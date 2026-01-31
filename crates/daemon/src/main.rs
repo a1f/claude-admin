@@ -1,6 +1,8 @@
 mod config;
 mod db;
+mod events;
 mod logging;
+mod models;
 mod pid;
 mod socket;
 mod tmux;

@@ -5,6 +5,7 @@ mod logging;
 mod models;
 mod pid;
 mod socket;
+mod state;
 mod tmux;
 
 use clap::Parser;

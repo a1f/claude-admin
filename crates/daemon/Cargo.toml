@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "daemon"
+path = "src/main.rs"
+
+[[bin]]
+name = "scan_panes"
+path = "src/bin/scan_panes.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full", "signal"] }
 clap = { version = "4", features = ["derive"] }

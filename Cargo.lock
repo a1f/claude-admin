@@ -92,6 +92,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 
 [[package]]
+name = "ca-lib"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dirs",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -158,10 +172,9 @@ name = "daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ca-lib",
  "clap",
- "dirs",
  "libc",
- "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

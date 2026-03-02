@@ -1,15 +1,9 @@
-mod config;
-mod db;
-mod events;
 mod logging;
-mod models;
 mod pid;
 mod socket;
-mod state;
-mod tmux;
 
+use ca_lib::config::{Args, Config};
 use clap::Parser;
-use config::{Args, Config};
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::broadcast;
@@ -29,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(pid = std::process::id(), "Daemon starting");
 
     let pid_file = pid::PidFile::create(&config.pid_file)?;
-    let _db = Arc::new(db::Database::open(&config.db_path)?);
+    let _db = Arc::new(ca_lib::db::Database::open(&config.db_path)?);
     let (shutdown_tx, _shutdown_rx) = broadcast::channel::<()>(1);
     let socket_server = socket::SocketServer::bind(&config.socket_path, false).await?;
 

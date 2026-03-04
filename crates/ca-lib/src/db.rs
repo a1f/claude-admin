@@ -318,6 +318,14 @@ impl Database {
         Ok(events)
     }
 
+    pub fn delete_events_for_session(&self, session_id: &str) -> Result<usize, DbError> {
+        let rows = self.conn.execute(
+            "DELETE FROM events WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(rows)
+    }
+
     pub fn get_recent_events(&self, limit: usize) -> Result<Vec<Event>, DbError> {
         let mut stmt = self.conn.prepare(
             r#"

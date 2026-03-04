@@ -21,7 +21,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/daemon/src/main.rs (use ca_lib::)  |                                               |
        |                               |         | M: crates/daemon/src/bin/scan_panes.rs       |                                               |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.2  | Session discovery module      | Pending | C: crates/ca-lib/src/discovery.rs            | cargo test -p ca-lib discovery::tests         | is_claude_process covers: "claude",
+ M0.2  | Session discovery module      | Done | C: crates/ca-lib/src/discovery.rs            | cargo test -p ca-lib discovery::tests         | is_claude_process covers: "claude",
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        | >= 8 unit tests                               |   "node", "deno", version patterns
        |                               |         |                                             |                                               | discover creates DB records correctly
        |                               |         |                                             |                                               | cleanup removes stale sessions

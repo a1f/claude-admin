@@ -26,7 +26,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |                                               | discover creates DB records correctly
        |                               |         |                                             |                                               | cleanup removes stale sessions
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.3  | Polling loop                  | Pending | C: crates/daemon/src/polling.rs              | cargo build -p daemon                         | Shutdown signal respected (no hangs)
+ M0.3  | Polling loop                  | Done | C: crates/daemon/src/polling.rs              | cargo build -p daemon                         | Shutdown signal respected (no hangs)
        |                               |         | M: crates/daemon/src/main.rs (spawn task)    | Start daemon + open Claude in tmux            | 5s interval, no busy-wait
        |                               |         |                                             | Check daemon.log for discovery messages        | State changes logged as events
        |                               |         |                                             | Close Claude, check cleanup messages           |

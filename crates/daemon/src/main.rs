@@ -1,10 +1,12 @@
 mod logging;
 mod pid;
+mod polling;
 mod socket;
 
 use ca_lib::config::{Args, Config};
 use clap::Parser;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::signal;
 use tokio::sync::broadcast;
 
@@ -23,15 +25,21 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(pid = std::process::id(), "Daemon starting");
 
     let pid_file = pid::PidFile::create(&config.pid_file)?;
-    let _db = Arc::new(ca_lib::db::Database::open(&config.db_path)?);
-    let (shutdown_tx, _shutdown_rx) = broadcast::channel::<()>(1);
+    let db = Arc::new(Mutex::new(ca_lib::db::Database::open(&config.db_path)?));
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let socket_server = socket::SocketServer::bind(&config.socket_path, false).await?;
 
     tracing::info!("Daemon initialized successfully");
 
+    let polling_handle = tokio::spawn(polling::run_polling_loop(
+        Arc::clone(&db),
+        shutdown_tx.subscribe(),
+    ));
+
     let result = run_server(socket_server, shutdown_tx.clone()).await;
 
     tracing::info!("Daemon shutting down");
+    let _ = tokio::time::timeout(Duration::from_secs(10), polling_handle).await;
     drop(pid_file);
 
     result

@@ -13,6 +13,8 @@ thiserror = "1"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
+tokio = { version = "1", features = ["net", "io-util"] }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["full"] }

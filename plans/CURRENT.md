@@ -31,39 +31,54 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             | Check daemon.log for discovery messages        | State changes logged as events
        |                               |         |                                             | Close Claude, check cleanup messages           |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.4  | Expand IPC protocol           | Pending | C: crates/ca-lib/src/ipc.rs                  | cargo test --workspace                        | Request/Response serde round-trips
-       |                               |         | M: crates/daemon/src/socket.rs (use ipc)     | echo '{"type":"list_sessions"}' | nc -U sock  | IpcClient reconnect/error handling
-       |                               |         | M: crates/daemon/src/main.rs (Arc<Database>) | Verify JSON response with sessions            | No unwrap in handler dispatch
-       |                               |         | M: crates/ca-lib/src/lib.rs (pub mod ipc)    |                                               |
+ M0.4  | Expand IPC protocol           | Done | C: crates/ca-lib/src/ipc.rs                  | cargo test -p ca-lib ipc::tests               | Request/Response serde round-trips
+       |                               |         | M: crates/daemon/src/socket.rs (use ipc)     | cargo test -p daemon socket::tests            | IpcClient reconnect/error handling
+       |                               |         | M: crates/daemon/src/main.rs (Arc<Database>) | >= 12 tests: serde round-trips for all        | No unwrap in handler dispatch
+       |                               |         | M: crates/ca-lib/src/lib.rs (pub mod ipc)    |   Request/Response variants, handler          |
+       |                               |         |                                             |   dispatch returns correct response types,    |
+       |                               |         |                                             |   socket integration test (ping + list)       |
+       |                               |         |                                             | Manual: echo JSON | nc -U sock                |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
  M0.5  | Hooks handler + shell script  | Pending | C: crates/ca-lib/src/hooks.rs                | cargo test -p ca-lib hooks::tests             | infer_state_from_hook mapping complete
-       |                               |         | C: scripts/claude-admin-hook.sh              | echo hook JSON | nc -U sock                   | find_session_for_hook by working_dir
-       |                               |         | M: crates/ca-lib/src/lib.rs (pub mod hooks)  | Check state updated in DB                     | Shell script: exit 0 even if daemon down
-       |                               |         |                                             |                                               | Script is chmod +x
+       |                               |         | C: scripts/claude-admin-hook.sh              | >= 10 tests: infer_state for all hook types,  | find_session_for_hook by working_dir
+       |                               |         | M: crates/ca-lib/src/lib.rs (pub mod hooks)  |   HookEvent serde round-trips,               | Shell script: exit 0 even if daemon down
+       |                               |         |                                             |   find_session_for_hook (match/no-match),     | Script is chmod +x
+       |                               |         |                                             |   apply_hook_event updates DB state           |
+       |                               |         |                                             | Manual: echo hook JSON | nc -U sock           |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.6  | CLI crate (basic commands)    | Pending | C: crates/cli/{Cargo.toml,src/main.rs}       | cargo run -p cli -- ping                      | Graceful "daemon not running" message
-       |                               |         | M: Cargo.toml (workspace members)            | cargo run -p cli -- list                      | Consistent output formatting
-       |                               |         |                                             | cargo run -p cli -- status                    | Clap subcommands: status,list,events,
-       |                               |         |                                             | cargo run -p cli -- events --limit 5          |   ping,daemon {start,stop}
+ M0.6  | CLI crate (basic commands)    | Pending | C: crates/cli/{Cargo.toml,src/main.rs}       | cargo test -p cli                             | Graceful "daemon not running" message
+       |                               |         | M: Cargo.toml (workspace members)            | >= 6 tests: clap arg parsing validates        | Consistent output formatting
+       |                               |         |                                             |   subcommands, output formatting helpers,     | Clap subcommands: status,list,events,
+       |                               |         |                                             |   IpcClient error handling (connection        |   ping,daemon {start,stop}
+       |                               |         |                                             |   refused → graceful message)                 |
+       |                               |         |                                             | Manual: cargo run -p cli -- ping/list/status  |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.7  | TUI scaffold (ratatui)        | Pending | C: crates/tui/{Cargo.toml,src/main.rs}       | cargo run -p tui                              | Terminal restore on panic (crossterm)
-       |                               |         | C: crates/tui/src/app.rs                     | Sessions listed with colored states            | Event loop: key events + tick timer
-       |                               |         | C: crates/tui/src/ui.rs                      | j/k navigation works                          | App state: sessions, selected_index
-       |                               |         | M: Cargo.toml (workspace members)            | Enter/a attaches (tmux attach)                | Clean separation: app.rs=state, ui.rs=render
-       |                               |         |                                             | q quits cleanly                               |
+ M0.7  | TUI scaffold (ratatui)        | Pending | C: crates/tui/{Cargo.toml,src/main.rs}       | cargo test -p tui app::tests                  | Terminal restore on panic (crossterm)
+       |                               |         | C: crates/tui/src/app.rs                     | >= 8 tests: App state transitions,            | Event loop: key events + tick timer
+       |                               |         | C: crates/tui/src/ui.rs                      |   select_next/prev wraps correctly,           | App state: sessions, selected_index
+       |                               |         | M: Cargo.toml (workspace members)            |   handle_key for j/k/q/Enter, empty list      | Clean separation: app.rs=state, ui.rs=render
+       |                               |         |                                             |   edge case, session list update              |
+       |                               |         |                                             | Manual: cargo run -p tui, j/k/Enter/q         |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.8  | TUI output preview pane       | Pending | M: crates/tui/src/app.rs (preview state)     | Select session, preview shows pane content    | Preview refreshes on selection change
-       |                               |         | M: crates/tui/src/ui.rs (right panel)        | Content updates every 2s                      | No flicker on refresh
-       |                               |         |                                             | Layout: 60/40 split left/right                | Handles empty/no-session gracefully
+ M0.8  | TUI output preview pane       | Pending | M: crates/tui/src/app.rs (preview state)     | cargo test -p tui                             | Preview refreshes on selection change
+       |                               |         | M: crates/tui/src/ui.rs (right panel)        | >= 4 tests: preview state on selection         | No flicker on refresh
+       |                               |         |                                             |   change, empty/no-session returns None,      | Handles empty/no-session gracefully
+       |                               |         |                                             |   preview cleared on session removal          |
+       |                               |         |                                             | Manual: select session, verify 60/40 split    |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.9  | TUI real-time IPC subscriptions| Pending | M: crates/daemon/src/socket.rs (subscribers) | Open TUI, start Claude in tmux                | Subscriber cleanup on disconnect
-       |                               |         | M: crates/tui/src/app.rs (Subscribe + push)  | State change appears in TUI within 1s         | tokio::select! in TUI event loop
-       |                               |         |                                             | No manual refresh needed                      | Broadcast doesn't block daemon
+ M0.9  | TUI real-time IPC subscriptions| Pending | M: crates/daemon/src/socket.rs (subscribers) | cargo test -p daemon socket::tests            | Subscriber cleanup on disconnect
+       |                               |         | M: crates/tui/src/app.rs (Subscribe + push)  | >= 6 tests: subscriber add/remove,            | tokio::select! in TUI event loop
+       |                               |         |                                             |   broadcast delivery to multiple subs,        | Broadcast doesn't block daemon
+       |                               |         |                                             |   subscriber cleanup on disconnect,           |
+       |                               |         |                                             |   broadcast with no subscribers is no-op      |
+       |                               |         |                                             | Manual: TUI + Claude, verify live updates     |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.10 | Hook install CLI command      | Pending | C: crates/ca-lib/src/hooks/install.rs        | ca hooks install -> modifies settings.json    | Reads existing settings.json safely
-       |                               |         | M: crates/cli/src/main.rs (hooks subcommand) | ca hooks status -> shows "installed"          | Merges hooks, preserves other settings
-       |                               |         |                                             | ca hooks uninstall -> removes entries         | Idempotent (re-install = no-op)
-       |                               |         |                                             | Run again -> "already installed"              | Script copied + chmod +x
+ M0.10 | Hook install CLI command      | Pending | C: crates/ca-lib/src/hooks/install.rs        | cargo test -p ca-lib hooks::install::tests    | Reads existing settings.json safely
+       |                               |         | M: crates/cli/src/main.rs (hooks subcommand) | >= 8 tests: install into empty dir,           | Merges hooks, preserves other settings
+       |                               |         |                                             |   install merges with existing settings,      | Idempotent (re-install = no-op)
+       |                               |         |                                             |   idempotent re-install, uninstall removes,   | Script copied + chmod +x
+       |                               |         |                                             |   uninstall when not installed, status check, |
+       |                               |         |                                             |   preserves non-hook settings in JSON         |
 ```
 
 **M0 Exit Criteria:** Start daemon, open Claude in tmux, run TUI. Sessions appear with live state updates. Enter attaches. Hooks forward events. CLI queries work.

@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         shutdown_tx.subscribe(),
     ));
 
-    let result = run_server(socket_server, shutdown_tx.clone()).await;
+    let result = run_server(socket_server, Arc::clone(&db), shutdown_tx.clone()).await;
 
     tracing::info!("Daemon shutting down");
     let _ = tokio::time::timeout(Duration::from_secs(10), polling_handle).await;
@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn run_server(
     server: socket::SocketServer,
+    db: Arc<Mutex<ca_lib::db::Database>>,
     shutdown_tx: broadcast::Sender<()>,
 ) -> anyhow::Result<()> {
     loop {
@@ -55,8 +56,9 @@ async fn run_server(
                 match accept_result {
                     Ok(conn) => {
                         tracing::debug!("New client connection");
+                        let db_clone = Arc::clone(&db);
                         tokio::spawn(async move {
-                            if let Err(e) = socket::handle_connection(conn).await {
+                            if let Err(e) = socket::handle_connection(conn, db_clone).await {
                                 tracing::error!(error = %e, "Connection handler error");
                             }
                         });

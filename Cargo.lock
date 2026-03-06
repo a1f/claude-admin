@@ -1151,7 +1151,9 @@ version = "0.1.0"
 dependencies = [
  "ca-lib",
  "crossterm",
+ "dirs",
  "ratatui",
+ "tokio",
 ]
 
 [[package]]

@@ -31,12 +31,21 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Daemon initialized successfully");
 
+    let (update_tx, _) = broadcast::channel::<Vec<ca_lib::models::Session>>(16);
+
     let polling_handle = tokio::spawn(polling::run_polling_loop(
         Arc::clone(&db),
         shutdown_tx.subscribe(),
+        update_tx.clone(),
     ));
 
-    let result = run_server(socket_server, Arc::clone(&db), shutdown_tx.clone()).await;
+    let result = run_server(
+        socket_server,
+        Arc::clone(&db),
+        shutdown_tx.clone(),
+        update_tx,
+    )
+    .await;
 
     tracing::info!("Daemon shutting down");
     let _ = tokio::time::timeout(Duration::from_secs(10), polling_handle).await;
@@ -49,6 +58,7 @@ async fn run_server(
     server: socket::SocketServer,
     db: Arc<Mutex<ca_lib::db::Database>>,
     shutdown_tx: broadcast::Sender<()>,
+    update_tx: broadcast::Sender<Vec<ca_lib::models::Session>>,
 ) -> anyhow::Result<()> {
     loop {
         tokio::select! {
@@ -57,8 +67,9 @@ async fn run_server(
                     Ok(conn) => {
                         tracing::debug!("New client connection");
                         let db_clone = Arc::clone(&db);
+                        let update_tx = update_tx.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = socket::handle_connection(conn, db_clone).await {
+                            if let Err(e) = socket::handle_connection(conn, db_clone, update_tx).await {
                                 tracing::error!(error = %e, "Connection handler error");
                             }
                         });

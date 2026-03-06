@@ -1,11 +1,13 @@
 use ca_lib::db::Database;
 use ca_lib::hooks::apply_hook_event;
 use ca_lib::ipc::{Request, Response};
+use ca_lib::models::Session;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::broadcast;
 
 #[derive(Error, Debug)]
 pub enum SocketError {
@@ -111,18 +113,84 @@ impl Connection {
         self.writer.flush().await?;
         Ok(())
     }
+
+    /// Split into reader and writer for concurrent use in subscriber mode.
+    fn into_parts(
+        self,
+    ) -> (
+        BufReader<tokio::io::ReadHalf<UnixStream>>,
+        tokio::io::WriteHalf<UnixStream>,
+    ) {
+        (self.reader, self.writer)
+    }
 }
 
 pub async fn handle_connection(
     mut conn: Connection,
     db: Arc<Mutex<Database>>,
+    update_tx: broadcast::Sender<Vec<Session>>,
 ) -> Result<(), SocketError> {
     while let Some(request) = conn.recv().await? {
         tracing::debug!(?request, "Received IPC request");
+
+        if matches!(request, Request::Subscribe) {
+            conn.send(&Response::Subscribed).await?;
+            return handle_subscriber(conn, update_tx.subscribe()).await;
+        }
+
+        let is_hook = matches!(request, Request::HookEvent { .. });
         let response = dispatch_request(request, Arc::clone(&db)).await;
         conn.send(&response).await?;
+
+        // Hook events change session state -- notify subscribers
+        if is_hook && matches!(response, Response::HookAck { .. }) {
+            crate::polling::broadcast_sessions(&db, &update_tx).await;
+        }
     }
     Ok(())
+}
+
+async fn handle_subscriber(
+    conn: Connection,
+    mut update_rx: broadcast::Receiver<Vec<Session>>,
+) -> Result<(), SocketError> {
+    let (mut reader, mut writer) = conn.into_parts();
+    let mut disconnect_buf = [0u8; 1];
+
+    loop {
+        tokio::select! {
+            result = update_rx.recv() => {
+                match result {
+                    Ok(sessions) => {
+                        let response = Response::SessionUpdate { sessions };
+                        let json = serde_json::to_string(&response)?;
+                        if let Err(e) = async {
+                            writer.write_all(json.as_bytes()).await?;
+                            writer.write_all(b"\n").await?;
+                            writer.flush().await
+                        }.await {
+                            tracing::debug!(error = %e, "Subscriber disconnected");
+                            return Ok(());
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(count = n, "Subscriber lagged, skipping messages");
+                    }
+                }
+            }
+            // Detect client disconnect by watching for EOF on the read side
+            read_result = reader.read(&mut disconnect_buf) => {
+                match read_result {
+                    Ok(0) | Err(_) => {
+                        tracing::debug!("Subscriber connection closed");
+                        return Ok(());
+                    }
+                    Ok(_) => continue,
+                }
+            }
+        }
+    }
 }
 
 async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Response {
@@ -172,6 +240,9 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
             .map(|session_id| Response::HookAck { session_id })
             .unwrap_or_else(|e| Response::Error { message: e })
         }
+
+        // Handled before dispatch in handle_connection; included for exhaustiveness
+        Request::Subscribe => Response::Subscribed,
     }
 }
 
@@ -393,6 +464,11 @@ mod tests {
         }
     }
 
+    fn make_update_tx() -> broadcast::Sender<Vec<Session>> {
+        let (tx, _) = broadcast::channel(16);
+        tx
+    }
+
     // -- Socket integration tests --
 
     #[tokio::test]
@@ -404,10 +480,11 @@ mod tests {
 
         let server = SocketServer::bind(&socket_path, false).await.unwrap();
         let db_clone = Arc::clone(&db);
+        let update_tx = make_update_tx();
 
         let server_task = tokio::spawn(async move {
             let conn = server.accept().await.unwrap();
-            handle_connection(conn, db_clone).await.unwrap();
+            handle_connection(conn, db_clone, update_tx).await.unwrap();
         });
 
         let stream = UnixStream::connect(&socket_path).await.unwrap();
@@ -447,10 +524,11 @@ mod tests {
         let db = Arc::new(Mutex::new(db));
         let server = SocketServer::bind(&socket_path, false).await.unwrap();
         let db_clone = Arc::clone(&db);
+        let update_tx = make_update_tx();
 
         let server_task = tokio::spawn(async move {
             let conn = server.accept().await.unwrap();
-            handle_connection(conn, db_clone).await.unwrap();
+            handle_connection(conn, db_clone, update_tx).await.unwrap();
         });
 
         let stream = UnixStream::connect(&socket_path).await.unwrap();
@@ -500,10 +578,11 @@ mod tests {
         let db = Arc::new(Mutex::new(db));
         let server = SocketServer::bind(&socket_path, false).await.unwrap();
         let db_clone = Arc::clone(&db);
+        let update_tx = make_update_tx();
 
         let server_task = tokio::spawn(async move {
             let conn = server.accept().await.unwrap();
-            handle_connection(conn, db_clone).await.unwrap();
+            handle_connection(conn, db_clone, update_tx).await.unwrap();
         });
 
         let stream = UnixStream::connect(&socket_path).await.unwrap();
@@ -548,5 +627,278 @@ mod tests {
             .await
             .expect("server task timed out")
             .expect("server task panicked");
+    }
+
+    // -- Subscription tests --
+
+    #[tokio::test]
+    async fn test_subscribe_returns_subscribed() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("test.sock");
+        let (db, _db_dir) = create_test_db();
+        let db = Arc::new(Mutex::new(db));
+
+        let server = SocketServer::bind(&socket_path, false).await.unwrap();
+        let db_clone = Arc::clone(&db);
+        let update_tx = make_update_tx();
+
+        let server_task = tokio::spawn(async move {
+            let conn = server.accept().await.unwrap();
+            handle_connection(conn, db_clone, update_tx).await.unwrap();
+        });
+
+        let stream = UnixStream::connect(&socket_path).await.unwrap();
+        let (read_half, mut write_half) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read_half);
+
+        let req = serde_json::to_string(&Request::Subscribe).unwrap();
+        write_half.write_all(req.as_bytes()).await.unwrap();
+        write_half.write_all(b"\n").await.unwrap();
+        write_half.flush().await.unwrap();
+
+        let mut response = String::new();
+        reader.read_line(&mut response).await.unwrap();
+        let resp: Response = serde_json::from_str(response.trim()).unwrap();
+        assert_eq!(resp, Response::Subscribed);
+
+        drop(write_half);
+        drop(reader);
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), server_task)
+            .await
+            .expect("server task timed out")
+            .expect("server task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_subscriber_receives_broadcast() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("test.sock");
+        let (db, _db_dir) = create_test_db();
+        let db = Arc::new(Mutex::new(db));
+
+        let server = SocketServer::bind(&socket_path, false).await.unwrap();
+        let db_clone = Arc::clone(&db);
+        let (update_tx, _) = broadcast::channel::<Vec<Session>>(16);
+        let update_tx_clone = update_tx.clone();
+
+        let server_task = tokio::spawn(async move {
+            let conn = server.accept().await.unwrap();
+            handle_connection(conn, db_clone, update_tx_clone)
+                .await
+                .unwrap();
+        });
+
+        let stream = UnixStream::connect(&socket_path).await.unwrap();
+        let (read_half, mut write_half) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read_half);
+
+        // Subscribe
+        let req = serde_json::to_string(&Request::Subscribe).unwrap();
+        write_half.write_all(req.as_bytes()).await.unwrap();
+        write_half.write_all(b"\n").await.unwrap();
+        write_half.flush().await.unwrap();
+
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let resp: Response = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(resp, Response::Subscribed);
+
+        // Broadcast a session update
+        let sessions = vec![create_test_session("sess-1", "%0")];
+        update_tx.send(sessions.clone()).unwrap();
+
+        // Read the push
+        let mut push_line = String::new();
+        reader.read_line(&mut push_line).await.unwrap();
+        let push: Response = serde_json::from_str(push_line.trim()).unwrap();
+        match push {
+            Response::SessionUpdate {
+                sessions: received,
+            } => {
+                assert_eq!(received.len(), 1);
+                assert_eq!(received[0].id, "sess-1");
+            }
+            other => panic!("expected SessionUpdate, got {other:?}"),
+        }
+
+        drop(write_half);
+        drop(reader);
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), server_task)
+            .await
+            .expect("server task timed out")
+            .expect("server task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_subscriber_cleanup_on_disconnect() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("test.sock");
+        let (db, _db_dir) = create_test_db();
+        let db = Arc::new(Mutex::new(db));
+
+        let server = SocketServer::bind(&socket_path, false).await.unwrap();
+        let db_clone = Arc::clone(&db);
+        let (update_tx, _) = broadcast::channel::<Vec<Session>>(16);
+        let update_tx_clone = update_tx.clone();
+
+        let server_task = tokio::spawn(async move {
+            let conn = server.accept().await.unwrap();
+            handle_connection(conn, db_clone, update_tx_clone)
+                .await
+                .unwrap();
+        });
+
+        let stream = UnixStream::connect(&socket_path).await.unwrap();
+        let (read_half, mut write_half) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read_half);
+
+        // Subscribe
+        let req = serde_json::to_string(&Request::Subscribe).unwrap();
+        write_half.write_all(req.as_bytes()).await.unwrap();
+        write_half.write_all(b"\n").await.unwrap();
+        write_half.flush().await.unwrap();
+
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(
+            serde_json::from_str::<Response>(line.trim()).unwrap(),
+            Response::Subscribed
+        );
+
+        // Drop client connection
+        drop(write_half);
+        drop(reader);
+
+        // Server task should complete without panic
+        tokio::time::timeout(std::time::Duration::from_secs(2), server_task)
+            .await
+            .expect("server task timed out")
+            .expect("server task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_no_subscribers_is_noop() {
+        let (tx, _) = broadcast::channel::<Vec<Session>>(16);
+        let sessions = vec![create_test_session("sess-1", "%0")];
+
+        // send() returns Err when there are no receivers, but that's expected
+        let result = tx.send(sessions);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_subscribers_receive_broadcast() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("test.sock");
+        let (db, _db_dir) = create_test_db();
+        let db = Arc::new(Mutex::new(db));
+
+        let server = SocketServer::bind(&socket_path, false).await.unwrap();
+        let (update_tx, _) = broadcast::channel::<Vec<Session>>(16);
+        let sub_req = serde_json::to_string(&Request::Subscribe).unwrap();
+
+        // Spawn an accept loop that handles both connections
+        let db1 = Arc::clone(&db);
+        let tx1 = update_tx.clone();
+        let db2 = Arc::clone(&db);
+        let tx2 = update_tx.clone();
+
+        // Spawn accept+handle for connection 1
+        let accept_task = tokio::spawn({
+            async move {
+                let conn1 = server.accept().await.unwrap();
+                let task1 = tokio::spawn(
+                    async move { handle_connection(conn1, db1, tx1).await.unwrap() },
+                );
+                let conn2 = server.accept().await.unwrap();
+                let task2 = tokio::spawn(
+                    async move { handle_connection(conn2, db2, tx2).await.unwrap() },
+                );
+                (task1, task2)
+            }
+        });
+
+        // Connect first subscriber
+        let stream1 = UnixStream::connect(&socket_path).await.unwrap();
+        let (r1, mut w1) = tokio::io::split(stream1);
+        let mut reader1 = BufReader::new(r1);
+
+        w1.write_all(sub_req.as_bytes()).await.unwrap();
+        w1.write_all(b"\n").await.unwrap();
+        w1.flush().await.unwrap();
+
+        let mut line1 = String::new();
+        reader1.read_line(&mut line1).await.unwrap();
+        assert_eq!(
+            serde_json::from_str::<Response>(line1.trim()).unwrap(),
+            Response::Subscribed
+        );
+
+        // Connect second subscriber
+        let stream2 = UnixStream::connect(&socket_path).await.unwrap();
+        let (r2, mut w2) = tokio::io::split(stream2);
+        let mut reader2 = BufReader::new(r2);
+
+        w2.write_all(sub_req.as_bytes()).await.unwrap();
+        w2.write_all(b"\n").await.unwrap();
+        w2.flush().await.unwrap();
+
+        let mut line2 = String::new();
+        reader2.read_line(&mut line2).await.unwrap();
+        assert_eq!(
+            serde_json::from_str::<Response>(line2.trim()).unwrap(),
+            Response::Subscribed
+        );
+
+        // Wait for accept_task to finish spawning both handlers
+        let (server_task1, server_task2) = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            accept_task,
+        )
+        .await
+        .expect("accept task timed out")
+        .expect("accept task panicked");
+
+        // Broadcast
+        let sessions = vec![create_test_session("sess-x", "%5")];
+        update_tx.send(sessions).unwrap();
+
+        // Both should receive the update
+        let mut push1 = String::new();
+        reader1.read_line(&mut push1).await.unwrap();
+        let resp1: Response = serde_json::from_str(push1.trim()).unwrap();
+        match resp1 {
+            Response::SessionUpdate { sessions } => {
+                assert_eq!(sessions[0].id, "sess-x");
+            }
+            other => panic!("sub1: expected SessionUpdate, got {other:?}"),
+        }
+
+        let mut push2 = String::new();
+        reader2.read_line(&mut push2).await.unwrap();
+        let resp2: Response = serde_json::from_str(push2.trim()).unwrap();
+        match resp2 {
+            Response::SessionUpdate { sessions } => {
+                assert_eq!(sessions[0].id, "sess-x");
+            }
+            other => panic!("sub2: expected SessionUpdate, got {other:?}"),
+        }
+
+        // Cleanup
+        drop(w1);
+        drop(reader1);
+        drop(w2);
+        drop(reader2);
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), server_task1)
+            .await
+            .expect("server task 1 timed out")
+            .expect("server task 1 panicked");
+        tokio::time::timeout(std::time::Duration::from_secs(1), server_task2)
+            .await
+            .expect("server task 2 timed out")
+            .expect("server task 2 panicked");
     }
 }

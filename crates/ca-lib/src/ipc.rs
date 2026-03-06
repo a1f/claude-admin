@@ -27,6 +27,7 @@ pub enum Request {
     GetEvents { session_id: String, limit: usize },
     GetRecentEvents { limit: usize },
     HookEvent { event: HookEvent },
+    Subscribe,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -38,6 +39,8 @@ pub enum Response {
     Events { events: Vec<Event> },
     HookAck { session_id: Option<String> },
     Error { message: String },
+    Subscribed,
+    SessionUpdate { sessions: Vec<Session> },
 }
 
 pub struct IpcClient {
@@ -56,12 +59,20 @@ impl IpcClient {
     }
 
     pub async fn send(&mut self, request: &Request) -> Result<Response, IpcError> {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        use tokio::io::AsyncWriteExt;
 
         let json = serde_json::to_string(request)?;
         self.writer.write_all(json.as_bytes()).await?;
         self.writer.write_all(b"\n").await?;
         self.writer.flush().await?;
+
+        self.recv_response().await
+    }
+
+    /// Read a single response/push message from the connection.
+    /// Used by subscribers to receive SessionUpdate pushes.
+    pub async fn recv_response(&mut self) -> Result<Response, IpcError> {
+        use tokio::io::AsyncBufReadExt;
 
         let mut line = String::new();
         let bytes = self.reader.read_line(&mut line).await?;
@@ -281,5 +292,67 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: Response = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, parsed);
+    }
+
+    // -- Subscribe/Subscribed/SessionUpdate round-trips --
+
+    #[test]
+    fn test_request_subscribe_roundtrip() {
+        let req = Request::Subscribe;
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    #[test]
+    fn test_request_subscribe_json_shape() {
+        let json = serde_json::to_string(&Request::Subscribe).unwrap();
+        assert!(json.contains("\"type\":\"subscribe\""));
+    }
+
+    #[test]
+    fn test_response_subscribed_roundtrip() {
+        let resp = Response::Subscribed;
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, parsed);
+    }
+
+    #[test]
+    fn test_response_subscribed_json_shape() {
+        let json = serde_json::to_string(&Response::Subscribed).unwrap();
+        assert!(json.contains("\"type\":\"subscribed\""));
+    }
+
+    #[test]
+    fn test_response_session_update_roundtrip() {
+        let sessions = vec![
+            make_session("sess-1", "%0", SessionState::Working),
+            make_session("sess-2", "%1", SessionState::Idle),
+        ];
+        let resp = Response::SessionUpdate { sessions };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, parsed);
+    }
+
+    #[test]
+    fn test_response_session_update_empty_roundtrip() {
+        let resp = Response::SessionUpdate {
+            sessions: Vec::new(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, parsed);
+    }
+
+    #[test]
+    fn test_response_session_update_json_shape() {
+        let json = serde_json::to_string(&Response::SessionUpdate {
+            sessions: vec![make_session("s1", "%0", SessionState::Idle)],
+        })
+        .unwrap();
+        assert!(json.contains("\"type\":\"session_update\""));
+        assert!(json.contains("\"sessions\""));
     }
 }

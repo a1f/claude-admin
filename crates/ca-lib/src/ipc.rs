@@ -1,4 +1,5 @@
 use crate::events::Event;
+use crate::hooks::HookEvent;
 use crate::models::Session;
 
 #[derive(Debug, thiserror::Error)]
@@ -16,7 +17,7 @@ pub enum IpcError {
     DaemonError(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     Ping,
@@ -25,6 +26,7 @@ pub enum Request {
     GetSessionByPane { pane_id: String },
     GetEvents { session_id: String, limit: usize },
     GetRecentEvents { limit: usize },
+    HookEvent { event: HookEvent },
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -34,6 +36,7 @@ pub enum Response {
     SessionList { sessions: Vec<Session> },
     Session { session: Option<Session> },
     Events { events: Vec<Event> },
+    HookAck { session_id: Option<String> },
     Error { message: String },
 }
 
@@ -250,5 +253,33 @@ mod tests {
         .unwrap();
         assert!(json.contains("\"type\":\"error\""));
         assert!(json.contains("\"message\":\"oops\""));
+    }
+
+    #[test]
+    fn test_request_hook_event_roundtrip() {
+        use crate::hooks::HookEvent;
+
+        let req = Request::HookEvent {
+            event: HookEvent {
+                hook_type: "PostToolUse".to_string(),
+                session_id: Some("sess-1".to_string()),
+                working_dir: "/home/user/project".to_string(),
+                timestamp: 1706500000,
+                payload: Some(serde_json::json!({"tool": "Read", "path": "/foo"})),
+            },
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    #[test]
+    fn test_response_hook_ack_roundtrip() {
+        let resp = Response::HookAck {
+            session_id: Some("sess-1".to_string()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, parsed);
     }
 }

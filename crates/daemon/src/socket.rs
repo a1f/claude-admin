@@ -1,4 +1,5 @@
 use ca_lib::db::Database;
+use ca_lib::hooks::apply_hook_event;
 use ca_lib::ipc::{Request, Response};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -159,6 +160,17 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
                 .await
                 .map(|events| Response::Events { events })
                 .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::HookEvent { event } => {
+            run_db(db, move |db| {
+                apply_hook_event(db, &event).map_err(|e| match e {
+                    ca_lib::hooks::HookError::Db(db_err) => db_err,
+                })
+            })
+            .await
+            .map(|session_id| Response::HookAck { session_id })
+            .unwrap_or_else(|e| Response::Error { message: e })
         }
     }
 }
@@ -464,6 +476,71 @@ mod tests {
             other => panic!("expected SessionList, got {other:?}"),
         }
 
+        drop(write_half);
+        drop(reader);
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), server_task)
+            .await
+            .expect("server task timed out")
+            .expect("server task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_ipc_hook_event() {
+        use ca_lib::hooks::HookEvent;
+
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("test.sock");
+        let (db, _db_dir) = create_test_db();
+
+        let mut session = create_test_session("sess-1", "%0");
+        session.working_dir = "/project".to_string();
+        db.create_session(&session).unwrap();
+
+        let db = Arc::new(Mutex::new(db));
+        let server = SocketServer::bind(&socket_path, false).await.unwrap();
+        let db_clone = Arc::clone(&db);
+
+        let server_task = tokio::spawn(async move {
+            let conn = server.accept().await.unwrap();
+            handle_connection(conn, db_clone).await.unwrap();
+        });
+
+        let stream = UnixStream::connect(&socket_path).await.unwrap();
+        let (read_half, mut write_half) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read_half);
+
+        let req = serde_json::to_string(&Request::HookEvent {
+            event: HookEvent {
+                hook_type: "PostToolUse".to_string(),
+                session_id: None,
+                working_dir: "/project".to_string(),
+                timestamp: 1706600000,
+                payload: None,
+            },
+        })
+        .unwrap();
+        write_half.write_all(req.as_bytes()).await.unwrap();
+        write_half.write_all(b"\n").await.unwrap();
+        write_half.flush().await.unwrap();
+
+        let mut response = String::new();
+        reader.read_line(&mut response).await.unwrap();
+        let resp: Response = serde_json::from_str(response.trim()).unwrap();
+
+        match resp {
+            Response::HookAck { session_id } => {
+                assert_eq!(session_id, Some("sess-1".to_string()));
+            }
+            other => panic!("expected HookAck, got {other:?}"),
+        }
+
+        // Verify the session state was updated in the database
+        let db_guard = db.lock().unwrap();
+        let updated = db_guard.get_session("sess-1").unwrap().unwrap();
+        assert_eq!(updated.state, SessionState::Working);
+
+        drop(db_guard);
         drop(write_half);
         drop(reader);
 

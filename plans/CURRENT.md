@@ -39,7 +39,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |   socket integration test (ping + list)       |
        |                               |         |                                             | Manual: echo JSON | nc -U sock                |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.5  | Hooks handler + shell script  | Pending | C: crates/ca-lib/src/hooks.rs                | cargo test -p ca-lib hooks::tests             | infer_state_from_hook mapping complete
+ M0.5  | Hooks handler + shell script  | Done | C: crates/ca-lib/src/hooks.rs                | cargo test -p ca-lib hooks::tests             | infer_state_from_hook mapping complete
        |                               |         | C: scripts/claude-admin-hook.sh              | >= 10 tests: infer_state for all hook types,  | find_session_for_hook by working_dir
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod hooks)  |   HookEvent serde round-trips,               | Shell script: exit 0 even if daemon down
        |                               |         |                                             |   find_session_for_hook (match/no-match),     | Script is chmod +x

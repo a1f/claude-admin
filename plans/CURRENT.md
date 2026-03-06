@@ -60,7 +60,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |   edge case, session list update              |
        |                               |         |                                             | Manual: cargo run -p tui, j/k/Enter/q         |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.8  | TUI output preview pane       | Pending | M: crates/tui/src/app.rs (preview state)     | cargo test -p tui                             | Preview refreshes on selection change
+ M0.8  | TUI output preview pane       | Done | M: crates/tui/src/app.rs (preview state)     | cargo test -p tui                             | Preview refreshes on selection change
        |                               |         | M: crates/tui/src/ui.rs (right panel)        | >= 4 tests: preview state on selection         | No flicker on refresh
        |                               |         |                                             |   change, empty/no-session returns None,      | Handles empty/no-session gracefully
        |                               |         |                                             |   preview cleared on session removal          |

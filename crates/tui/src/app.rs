@@ -1,3 +1,4 @@
+use ca_lib::events::Event;
 use ca_lib::models::Session;
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -11,6 +12,7 @@ pub struct App {
     pub sessions: Vec<Session>,
     pub selected_index: usize,
     pub should_quit: bool,
+    pub preview_events: Vec<Event>,
 }
 
 impl App {
@@ -19,6 +21,7 @@ impl App {
             sessions: Vec::new(),
             selected_index: 0,
             should_quit: false,
+            preview_events: Vec::new(),
         }
     }
 
@@ -29,6 +32,15 @@ impl App {
         } else if self.selected_index >= self.sessions.len() {
             self.selected_index = self.sessions.len() - 1;
         }
+        self.preview_events.clear();
+    }
+
+    pub fn update_preview(&mut self, events: Vec<Event>) {
+        self.preview_events = events;
+    }
+
+    pub fn clear_preview(&mut self) {
+        self.preview_events.clear();
     }
 
     pub fn select_next(&mut self) {
@@ -36,6 +48,7 @@ impl App {
             return;
         }
         self.selected_index = (self.selected_index + 1) % self.sessions.len();
+        self.preview_events.clear();
     }
 
     pub fn select_prev(&mut self) {
@@ -47,6 +60,7 @@ impl App {
         } else {
             self.selected_index -= 1;
         }
+        self.preview_events.clear();
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
@@ -82,6 +96,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ca_lib::events::EventType;
+    use ca_lib::models::SessionState;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn make_session(id: &str) -> Session {
@@ -280,5 +296,72 @@ mod tests {
         let action = app.handle_key(key(KeyCode::Char('x')));
         assert!(matches!(action, AppAction::None));
         assert!(!app.should_quit);
+    }
+
+    fn make_event(id: i64, event_type: EventType) -> Event {
+        Event {
+            id,
+            session_id: "sess-1".to_string(),
+            event_type,
+            payload: None,
+            timestamp: 1000 + id,
+        }
+    }
+
+    fn sample_events() -> Vec<Event> {
+        vec![
+            make_event(1, EventType::SessionDiscovered),
+            make_event(2, EventType::StateChanged {
+                from: SessionState::Idle,
+                to: SessionState::Working,
+            }),
+        ]
+    }
+
+    #[test]
+    fn test_preview_events_default_empty() {
+        let app = App::new();
+        assert!(app.preview_events.is_empty());
+    }
+
+    #[test]
+    fn test_update_preview_stores_events() {
+        let mut app = App::new();
+        let events = sample_events();
+        app.update_preview(events.clone());
+        assert_eq!(app.preview_events.len(), 2);
+        assert_eq!(app.preview_events[0].id, 1);
+        assert_eq!(app.preview_events[1].id, 2);
+    }
+
+    #[test]
+    fn test_clear_preview_empties_events() {
+        let mut app = App::new();
+        app.update_preview(sample_events());
+        assert!(!app.preview_events.is_empty());
+        app.clear_preview();
+        assert!(app.preview_events.is_empty());
+    }
+
+    #[test]
+    fn test_update_sessions_clears_preview() {
+        let mut app = App::new();
+        app.update_sessions(vec![make_session("a"), make_session("b")]);
+        app.update_preview(sample_events());
+        assert!(!app.preview_events.is_empty());
+
+        app.update_sessions(vec![make_session("x")]);
+        assert!(app.preview_events.is_empty());
+    }
+
+    #[test]
+    fn test_select_next_clears_preview() {
+        let mut app = App::new();
+        app.update_sessions(vec![make_session("a"), make_session("b")]);
+        app.update_preview(sample_events());
+        assert!(!app.preview_events.is_empty());
+
+        app.select_next();
+        assert!(app.preview_events.is_empty());
     }
 }

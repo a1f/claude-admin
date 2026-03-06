@@ -66,7 +66,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |   preview cleared on session removal          |
        |                               |         |                                             | Manual: select session, verify 60/40 split    |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.9  | TUI real-time IPC subscriptions| Pending | M: crates/daemon/src/socket.rs (subscribers) | cargo test -p daemon socket::tests            | Subscriber cleanup on disconnect
+ M0.9  | TUI real-time IPC subscriptions| Done | M: crates/daemon/src/socket.rs (subscribers) | cargo test -p daemon socket::tests            | Subscriber cleanup on disconnect
        |                               |         | M: crates/tui/src/app.rs (Subscribe + push)  | >= 6 tests: subscriber add/remove,            | tokio::select! in TUI event loop
        |                               |         |                                             |   broadcast delivery to multiple subs,        | Broadcast doesn't block daemon
        |                               |         |                                             |   subscriber cleanup on disconnect,           |

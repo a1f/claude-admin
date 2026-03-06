@@ -46,7 +46,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |   apply_hook_event updates DB state           |
        |                               |         |                                             | Manual: echo hook JSON | nc -U sock           |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.6  | CLI crate (basic commands)    | Pending | C: crates/cli/{Cargo.toml,src/main.rs}       | cargo test -p cli                             | Graceful "daemon not running" message
+ M0.6  | CLI crate (basic commands)    | Done | C: crates/cli/{Cargo.toml,src/main.rs}       | cargo test -p cli                             | Graceful "daemon not running" message
        |                               |         | M: Cargo.toml (workspace members)            | >= 6 tests: clap arg parsing validates        | Consistent output formatting
        |                               |         |                                             |   subcommands, output formatting helpers,     | Clap subcommands: status,list,events,
        |                               |         |                                             |   IpcClient error handling (connection        |   ping,daemon {start,stop}

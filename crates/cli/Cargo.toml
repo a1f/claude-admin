@@ -1,0 +1,17 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "claude-admin"
+path = "src/main.rs"
+
+[dependencies]
+ca-lib = { path = "../ca-lib" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+thiserror = "1"
+dirs = "5"
+libc = "0.2"

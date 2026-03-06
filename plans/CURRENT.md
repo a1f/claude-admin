@@ -53,7 +53,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |   refused → graceful message)                 |
        |                               |         |                                             | Manual: cargo run -p cli -- ping/list/status  |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.7  | TUI scaffold (ratatui)        | Pending | C: crates/tui/{Cargo.toml,src/main.rs}       | cargo test -p tui app::tests                  | Terminal restore on panic (crossterm)
+ M0.7  | TUI scaffold (ratatui)        | Done | C: crates/tui/{Cargo.toml,src/main.rs}       | cargo test -p tui app::tests                  | Terminal restore on panic (crossterm)
        |                               |         | C: crates/tui/src/app.rs                     | >= 8 tests: App state transitions,            | Event loop: key events + tick timer
        |                               |         | C: crates/tui/src/ui.rs                      |   select_next/prev wraps correctly,           | App state: sessions, selected_index
        |                               |         | M: Cargo.toml (workspace members)            |   handle_key for j/k/q/Enter, empty list      | Clean separation: app.rs=state, ui.rs=render

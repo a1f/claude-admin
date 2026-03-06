@@ -2,6 +2,7 @@ pub mod config;
 pub mod db;
 pub mod discovery;
 pub mod events;
+pub mod hook_install;
 pub mod hooks;
 pub mod ipc;
 pub mod models;

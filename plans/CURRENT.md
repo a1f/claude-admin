@@ -73,7 +73,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |   broadcast with no subscribers is no-op      |
        |                               |         |                                             | Manual: TUI + Claude, verify live updates     |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M0.10 | Hook install CLI command      | Pending | C: crates/ca-lib/src/hooks/install.rs        | cargo test -p ca-lib hooks::install::tests    | Reads existing settings.json safely
+ M0.10 | Hook install CLI command      | Done | C: crates/ca-lib/src/hook_install.rs         | cargo test -p ca-lib hook_install::tests      | Reads existing settings.json safely
        |                               |         | M: crates/cli/src/main.rs (hooks subcommand) | >= 8 tests: install into empty dir,           | Merges hooks, preserves other settings
        |                               |         |                                             |   install merges with existing settings,      | Idempotent (re-install = no-op)
        |                               |         |                                             |   idempotent re-install, uninstall removes,   | Script copied + chmod +x

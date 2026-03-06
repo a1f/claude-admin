@@ -57,12 +57,27 @@ pub enum Command {
         #[command(subcommand)]
         command: DaemonCommand,
     },
+    /// Manage Claude Code hook integration
+    Hooks {
+        #[command(subcommand)]
+        command: HooksCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum DaemonCommand {
     Start,
     Stop,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HooksCommand {
+    /// Install Claude Code hooks for session monitoring
+    Install,
+    /// Remove Claude Code hooks
+    Uninstall,
+    /// Check hook installation status
+    Status,
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +102,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             handle_events(&cli.socket, session_id.as_deref(), limit).await
         }
         Command::Daemon { command } => handle_daemon(command),
+        Command::Hooks { command } => handle_hooks(command),
     }
 }
 
@@ -211,6 +227,48 @@ fn handle_daemon(command: DaemonCommand) -> Result<(), CliError> {
     match command {
         DaemonCommand::Start => daemon_start(),
         DaemonCommand::Stop => daemon_stop(),
+    }
+}
+
+fn handle_hooks(command: HooksCommand) -> Result<(), CliError> {
+    let map_err = |e: ca_lib::hook_install::HookInstallError| CliError::DaemonError(e.to_string());
+
+    match command {
+        HooksCommand::Install => {
+            let script = ca_lib::hook_install::hook_script_path().map_err(map_err)?;
+            let settings = ca_lib::hook_install::settings_path().map_err(map_err)?;
+            let result = ca_lib::hook_install::install_hooks(&script, &settings).map_err(map_err)?;
+
+            if result.already_installed {
+                println!("Hooks are already installed.");
+            } else {
+                println!("Installed hooks: {}", result.hook_types_added.join(", "));
+                println!("Settings: {}", result.settings_path.display());
+            }
+            Ok(())
+        }
+        HooksCommand::Uninstall => {
+            let settings = ca_lib::hook_install::settings_path().map_err(map_err)?;
+            let removed = ca_lib::hook_install::uninstall_hooks(&settings).map_err(map_err)?;
+
+            if removed {
+                println!("Hooks removed from {}", settings.display());
+            } else {
+                println!("No hooks found to remove.");
+            }
+            Ok(())
+        }
+        HooksCommand::Status => {
+            let settings = ca_lib::hook_install::settings_path().map_err(map_err)?;
+            let status = ca_lib::hook_install::hooks_status(&settings).map_err(map_err)?;
+
+            println!("Hook status:");
+            for (hook_type, installed) in &status {
+                let indicator = if *installed { "[x]" } else { "[ ]" };
+                println!("  {indicator} {hook_type}");
+            }
+            Ok(())
+        }
     }
 }
 
@@ -582,5 +640,40 @@ mod tests {
         assert_eq!(state_indicator(&SessionState::Working), "* ");
         assert_eq!(state_indicator(&SessionState::NeedsInput), "! ");
         assert_eq!(state_indicator(&SessionState::Done), "- ");
+    }
+
+    // -- Group 5: Hooks CLI parsing --
+
+    #[test]
+    fn test_clap_hooks_install_parses() {
+        let cli = Cli::parse_from(["claude-admin", "hooks", "install"]);
+        match cli.command {
+            Command::Hooks { command } => {
+                assert!(matches!(command, HooksCommand::Install));
+            }
+            _ => panic!("expected Hooks command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_hooks_uninstall_parses() {
+        let cli = Cli::parse_from(["claude-admin", "hooks", "uninstall"]);
+        match cli.command {
+            Command::Hooks { command } => {
+                assert!(matches!(command, HooksCommand::Uninstall));
+            }
+            _ => panic!("expected Hooks command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_hooks_status_parses() {
+        let cli = Cli::parse_from(["claude-admin", "hooks", "status"]);
+        match cli.command {
+            Command::Hooks { command } => {
+                assert!(matches!(command, HooksCommand::Status));
+            }
+            _ => panic!("expected Hooks command"),
+        }
     }
 }

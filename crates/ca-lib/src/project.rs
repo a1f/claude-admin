@@ -1,8 +1,10 @@
 use crate::db::{Database, DbError};
+use crate::git;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::Path;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -219,7 +221,80 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_project_worktree(
+        &self,
+        id: i64,
+        worktree_path: Option<&str>,
+        branch_name: Option<&str>,
+    ) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        self.connection().execute(
+            r#"
+            UPDATE projects SET
+                worktree_path = ?2,
+                branch_name = ?3,
+                updated_at = ?4
+            WHERE id = ?1
+            "#,
+            params![id, worktree_path, branch_name, now],
+        )?;
+        Ok(())
+    }
+
+    /// Creates a project and, if the workspace is a git repo,
+    /// automatically sets up a git worktree for it.
+    /// Degrades gracefully: project is still created if git ops fail.
+    pub fn create_project_with_worktree(
+        &self,
+        workspace_id: i64,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<Project, DbError> {
+        let workspace = self
+            .get_workspace(workspace_id)?
+            .ok_or_else(|| DbError::InvalidState(format!("workspace {} not found", workspace_id)))?;
+
+        let workspace_path = Path::new(&workspace.path);
+
+        if !git::is_git_repo(workspace_path) {
+            return self.create_project(workspace_id, name, description);
+        }
+
+        let branch = git::sanitize_branch_name(name);
+        let wt_path_str = git::worktree_path_for_project(&workspace.path, name);
+        let wt_path = Path::new(&wt_path_str);
+
+        match git::create_worktree(workspace_path, &branch, wt_path) {
+            Ok(()) => {
+                let project = self.create_project(workspace_id, name, description)?;
+                self.update_project_worktree(
+                    project.id,
+                    Some(&wt_path_str),
+                    Some(&branch),
+                )?;
+                // Re-fetch to return accurate state
+                self.get_project(project.id)?
+                    .ok_or_else(|| DbError::InvalidState("project vanished after create".into()))
+            }
+            Err(e) => {
+                tracing::warn!(
+                    workspace_id,
+                    project_name = name,
+                    error = %e,
+                    "Failed to create git worktree, creating project without one"
+                );
+                self.create_project(workspace_id, name, description)
+            }
+        }
+    }
+
     pub fn delete_project(&self, id: i64) -> Result<bool, DbError> {
+        self.try_remove_project_worktree(id);
+
         let rows_affected = self
             .connection()
             .execute("DELETE FROM projects WHERE id = ?1", params![id])?;
@@ -227,7 +302,42 @@ impl Database {
     }
 
     pub fn archive_project(&self, id: i64) -> Result<(), DbError> {
-        self.update_project_status(id, ProjectStatus::Archived)
+        self.try_remove_project_worktree(id);
+        self.update_project_status(id, ProjectStatus::Archived)?;
+        self.update_project_worktree(id, None, None)?;
+        Ok(())
+    }
+
+    /// Best-effort worktree removal. Logs a warning on failure
+    /// but never propagates the error -- callers should not fail
+    /// just because a worktree could not be cleaned up.
+    fn try_remove_project_worktree(&self, project_id: i64) {
+        let project = match self.get_project(project_id) {
+            Ok(Some(p)) => p,
+            _ => return,
+        };
+
+        let wt_path_str = match &project.worktree_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        let workspace = match self.get_workspace(project.workspace_id) {
+            Ok(Some(ws)) => ws,
+            _ => return,
+        };
+
+        let repo_path = Path::new(&workspace.path);
+        let wt_path = Path::new(&wt_path_str);
+
+        if let Err(e) = git::remove_worktree(repo_path, wt_path) {
+            tracing::warn!(
+                project_id,
+                worktree_path = %wt_path_str,
+                error = %e,
+                "Failed to remove git worktree"
+            );
+        }
     }
 }
 
@@ -475,6 +585,67 @@ mod tests {
 
         let fetched = db.get_project(project.id).unwrap().unwrap();
         assert_eq!(fetched.description, None);
+        assert_eq!(fetched.worktree_path, None);
+        assert_eq!(fetched.branch_name, None);
+    }
+
+    #[test]
+    fn test_update_project_worktree() {
+        let (db, _dir) = create_test_db();
+        let ws_id = create_test_workspace(&db);
+
+        let project = db.create_project(ws_id, "WT Test", None).unwrap();
+        assert!(project.worktree_path.is_none());
+
+        db.update_project_worktree(project.id, Some("/tmp/wt"), Some("project/wt-test"))
+            .unwrap();
+
+        let fetched = db.get_project(project.id).unwrap().unwrap();
+        assert_eq!(fetched.worktree_path, Some("/tmp/wt".to_string()));
+        assert_eq!(fetched.branch_name, Some("project/wt-test".to_string()));
+
+        // Clear worktree fields
+        db.update_project_worktree(project.id, None, None).unwrap();
+
+        let cleared = db.get_project(project.id).unwrap().unwrap();
+        assert_eq!(cleared.worktree_path, None);
+        assert_eq!(cleared.branch_name, None);
+    }
+
+    #[test]
+    fn test_create_project_with_worktree_non_git() {
+        let (db, _dir) = create_test_db();
+        let tmp = tempdir().unwrap();
+        let ws = db
+            .create_workspace(tmp.path().to_str().unwrap(), Some("non-git"))
+            .unwrap();
+
+        let project = db
+            .create_project_with_worktree(ws.id, "feature-x", None)
+            .unwrap();
+
+        assert_eq!(project.name, "feature-x");
+        assert!(project.worktree_path.is_none());
+        assert!(project.branch_name.is_none());
+    }
+
+    #[test]
+    fn test_archive_project_clears_worktree() {
+        let (db, _dir) = create_test_db();
+        let ws_id = create_test_workspace(&db);
+
+        let project = db.create_project(ws_id, "Archivable", None).unwrap();
+        db.update_project_worktree(
+            project.id,
+            Some("/fake/wt"),
+            Some("project/archivable"),
+        )
+        .unwrap();
+
+        db.archive_project(project.id).unwrap();
+
+        let fetched = db.get_project(project.id).unwrap().unwrap();
+        assert_eq!(fetched.status, ProjectStatus::Archived);
         assert_eq!(fetched.worktree_path, None);
         assert_eq!(fetched.branch_name, None);
     }

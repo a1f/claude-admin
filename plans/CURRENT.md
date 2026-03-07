@@ -141,7 +141,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/tui/src/ui.rs (route to view)      | s spawns, a attaches, b batches               | Session-to-step linking visible
        |                               |         |                                             | State changes reflect in both panels          | Tab switches between panels
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.11 | Worktree management           | Pending | C: crates/ca-lib/src/git.rs                  | ca workspace add ~/dev/myapp                  | is_git_repo check before worktree ops
+ M1.11 | Worktree management           | Done    | C: crates/ca-lib/src/git.rs                  | ca workspace add ~/dev/myapp                  | is_git_repo check before worktree ops
        |                               |         | M: crates/ca-lib/src/project.rs (integrate)  | ca project create 1 "auth"                    | Worktree path: {repo}-worktrees/{proj}/
        |                               |         | M: crates/ca-lib/src/spawn.rs (use worktree) | ls ~/dev/myapp-worktrees/auth/  (exists)      | spawn uses worktree_path when set
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod git)    | git -C ~/dev/myapp worktree list              | Archive/delete removes worktree

@@ -1,4 +1,5 @@
-use crate::app::App;
+use crate::app::{App, ViewMode};
+use crate::plan_view;
 use ca_lib::events::EventType;
 use ca_lib::models::SessionState;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -8,6 +9,15 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wra
 use ratatui::Frame;
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    match app.view_mode {
+        ViewMode::Sessions => draw_sessions(frame, app),
+        ViewMode::Projects => plan_view::draw_projects(frame, app),
+        ViewMode::Plans => plan_view::draw_plans(frame, app),
+        ViewMode::PlanDetail => plan_view::draw_plan_detail(frame, app),
+    }
+}
+
+fn draw_sessions(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     if app.sessions.is_empty() {
@@ -51,7 +61,7 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().title(" Sessions ").borders(Borders::ALL))
+        .block(Block::default().title(" Sessions (p: plans) ").borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 

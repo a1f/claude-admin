@@ -1,11 +1,29 @@
 use ca_lib::events::Event;
 use ca_lib::models::Session;
+use ca_lib::plan::{Plan, Step, StepStatus};
+use ca_lib::project::Project;
 use crossterm::event::{KeyCode, KeyEvent};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Sessions,
+    Projects,
+    Plans,
+    PlanDetail,
+}
 
 pub enum AppAction {
     None,
     Quit,
     SelectSession(String),
+    LoadProjects,
+    LoadPlans(i64),
+    LoadPlan(i64),
+    CycleStepStatus {
+        plan_id: i64,
+        step_id: String,
+        new_status: StepStatus,
+    },
 }
 
 pub struct App {
@@ -14,6 +32,13 @@ pub struct App {
     pub should_quit: bool,
     pub preview_events: Vec<Event>,
     pub connected: bool,
+    pub view_mode: ViewMode,
+    pub projects: Vec<Project>,
+    pub project_index: usize,
+    pub plans: Vec<Plan>,
+    pub plan_index: usize,
+    pub current_plan: Option<Plan>,
+    pub step_index: usize,
 }
 
 impl App {
@@ -24,6 +49,13 @@ impl App {
             should_quit: false,
             preview_events: Vec::new(),
             connected: false,
+            view_mode: ViewMode::Sessions,
+            projects: Vec::new(),
+            project_index: 0,
+            plans: Vec::new(),
+            plan_index: 0,
+            current_plan: None,
+            step_index: 0,
         }
     }
 
@@ -43,6 +75,45 @@ impl App {
 
     pub fn clear_preview(&mut self) {
         self.preview_events.clear();
+    }
+
+    pub fn update_projects(&mut self, projects: Vec<Project>) {
+        self.projects = projects;
+        self.project_index = 0;
+    }
+
+    pub fn update_plans(&mut self, plans: Vec<Plan>) {
+        self.plans = plans;
+        self.plan_index = 0;
+    }
+
+    pub fn update_current_plan(&mut self, plan: Plan) {
+        self.current_plan = Some(plan);
+        self.step_index = 0;
+    }
+
+    /// Returns (phase_idx, step_idx) pairs for all steps in the current plan,
+    /// providing a flat index for navigation through the step list.
+    pub fn visible_steps(&self) -> Vec<(usize, usize)> {
+        let Some(plan) = &self.current_plan else {
+            return Vec::new();
+        };
+        let mut pairs = Vec::new();
+        for (pi, phase) in plan.content.phases.iter().enumerate() {
+            for (si, _step) in phase.steps.iter().enumerate() {
+                pairs.push((pi, si));
+            }
+        }
+        pairs
+    }
+
+    /// Returns the phase name and step reference for the currently selected step.
+    pub fn selected_step(&self) -> Option<(&str, &Step)> {
+        let plan = self.current_plan.as_ref()?;
+        let steps = self.visible_steps();
+        let &(pi, si) = steps.get(self.step_index)?;
+        let phase = &plan.content.phases[pi];
+        Some((&phase.name, &phase.steps[si]))
     }
 
     pub fn select_next(&mut self) {
@@ -75,6 +146,17 @@ impl App {
                 self.should_quit = true;
                 AppAction::Quit
             }
+            _ => match self.view_mode {
+                ViewMode::Sessions => self.handle_sessions_key(key.code),
+                ViewMode::Projects => self.handle_projects_key(key.code),
+                ViewMode::Plans => self.handle_plans_key(key.code),
+                ViewMode::PlanDetail => self.handle_plan_detail_key(key.code),
+            },
+        }
+    }
+
+    fn handle_sessions_key(&mut self, code: KeyCode) -> AppAction {
+        match code {
             KeyCode::Char('j') | KeyCode::Down => {
                 self.select_next();
                 AppAction::None
@@ -90,8 +172,133 @@ impl App {
                     AppAction::None
                 }
             }
+            KeyCode::Char('p') => {
+                self.view_mode = ViewMode::Projects;
+                AppAction::LoadProjects
+            }
             _ => AppAction::None,
         }
+    }
+
+    fn handle_projects_key(&mut self, code: KeyCode) -> AppAction {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.projects.is_empty() {
+                    self.project_index =
+                        (self.project_index + 1) % self.projects.len();
+                }
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if !self.projects.is_empty() {
+                    if self.project_index == 0 {
+                        self.project_index = self.projects.len() - 1;
+                    } else {
+                        self.project_index -= 1;
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                if let Some(project) = self.projects.get(self.project_index) {
+                    self.view_mode = ViewMode::Plans;
+                    AppAction::LoadPlans(project.id)
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::Sessions;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_plans_key(&mut self, code: KeyCode) -> AppAction {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.plans.is_empty() {
+                    self.plan_index = (self.plan_index + 1) % self.plans.len();
+                }
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if !self.plans.is_empty() {
+                    if self.plan_index == 0 {
+                        self.plan_index = self.plans.len() - 1;
+                    } else {
+                        self.plan_index -= 1;
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                if let Some(plan) = self.plans.get(self.plan_index) {
+                    self.view_mode = ViewMode::PlanDetail;
+                    AppAction::LoadPlan(plan.id)
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::Projects;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_plan_detail_key(&mut self, code: KeyCode) -> AppAction {
+        let step_count = self.visible_steps().len();
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if step_count > 0 {
+                    self.step_index = (self.step_index + 1) % step_count;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if step_count > 0 {
+                    if self.step_index == 0 {
+                        self.step_index = step_count - 1;
+                    } else {
+                        self.step_index -= 1;
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Char('s') => {
+                if let Some(plan) = &self.current_plan {
+                    let steps = self.visible_steps();
+                    if let Some(&(pi, si)) = steps.get(self.step_index) {
+                        let step = &plan.content.phases[pi].steps[si];
+                        let new_status = cycle_step_status(step.status);
+                        return AppAction::CycleStepStatus {
+                            plan_id: plan.id,
+                            step_id: step.id.clone(),
+                            new_status,
+                        };
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::Plans;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+}
+
+pub fn cycle_step_status(status: StepStatus) -> StepStatus {
+    match status {
+        StepStatus::Pending => StepStatus::InProgress,
+        StepStatus::InProgress => StepStatus::Completed,
+        StepStatus::Completed => StepStatus::Blocked,
+        StepStatus::Blocked => StepStatus::Skipped,
+        StepStatus::Skipped => StepStatus::Pending,
     }
 }
 
@@ -100,6 +307,8 @@ mod tests {
     use super::*;
     use ca_lib::events::EventType;
     use ca_lib::models::SessionState;
+    use ca_lib::plan::{ExitCriteria, Phase, PlanContent, PlanStatus};
+    use ca_lib::project::ProjectStatus;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn make_session(id: &str) -> Session {
@@ -110,7 +319,7 @@ mod tests {
             window_index: 0,
             pane_index: 0,
             working_dir: "/home/user".to_string(),
-            state: ca_lib::models::SessionState::Idle,
+            state: SessionState::Idle,
             detection_method: "process_name".to_string(),
             last_activity: 0,
             created_at: 0,
@@ -120,9 +329,75 @@ mod tests {
         }
     }
 
+    fn make_project(id: i64, name: &str) -> Project {
+        Project {
+            id,
+            workspace_id: 1,
+            name: name.to_string(),
+            description: None,
+            status: ProjectStatus::Active,
+            worktree_path: None,
+            branch_name: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn make_plan(id: i64, name: &str) -> Plan {
+        Plan {
+            id,
+            project_id: 1,
+            name: name.to_string(),
+            content: PlanContent {
+                phases: vec![
+                    Phase {
+                        name: "Setup".to_string(),
+                        steps: vec![Step {
+                            id: "0.1".to_string(),
+                            description: "Init".to_string(),
+                            status: StepStatus::Completed,
+                            exit_criteria: ExitCriteria {
+                                description: "Compiles".to_string(),
+                                commands: vec!["cargo build".to_string()],
+                            },
+                        }],
+                    },
+                    Phase {
+                        name: "Core".to_string(),
+                        steps: vec![
+                            Step {
+                                id: "1.1".to_string(),
+                                description: "Add models".to_string(),
+                                status: StepStatus::Pending,
+                                exit_criteria: ExitCriteria {
+                                    description: "Tests pass".to_string(),
+                                    commands: vec![],
+                                },
+                            },
+                            Step {
+                                id: "1.2".to_string(),
+                                description: "Add API".to_string(),
+                                status: StepStatus::InProgress,
+                                exit_criteria: ExitCriteria {
+                                    description: "Endpoints work".to_string(),
+                                    commands: vec!["cargo test".to_string()],
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+            status: PlanStatus::Active,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
+
+    // -- Original session tests (preserved) --
 
     #[test]
     fn test_new_app_defaults() {
@@ -367,5 +642,238 @@ mod tests {
 
         app.select_next();
         assert!(app.preview_events.is_empty());
+    }
+
+    // -- New plan viewer tests --
+
+    #[test]
+    fn test_view_mode_default_sessions() {
+        let app = App::new();
+        assert_eq!(app.view_mode, ViewMode::Sessions);
+    }
+
+    #[test]
+    fn test_handle_key_p_enters_projects() {
+        let mut app = App::new();
+        let action = app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.view_mode, ViewMode::Projects);
+        assert!(matches!(action, AppAction::LoadProjects));
+    }
+
+    #[test]
+    fn test_handle_key_b_returns_to_sessions_from_projects() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        let action = app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.view_mode, ViewMode::Sessions);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_handle_key_enter_in_projects_loads_plans() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        app.update_projects(vec![make_project(42, "MyProject")]);
+
+        let action = app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.view_mode, ViewMode::Plans);
+        match action {
+            AppAction::LoadPlans(id) => assert_eq!(id, 42),
+            _ => panic!("expected LoadPlans"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_b_returns_to_projects_from_plans() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        let action = app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.view_mode, ViewMode::Projects);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_handle_key_enter_in_plans_loads_detail() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        app.update_plans(vec![make_plan(7, "The Plan")]);
+
+        let action = app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.view_mode, ViewMode::PlanDetail);
+        match action {
+            AppAction::LoadPlan(id) => assert_eq!(id, 7),
+            _ => panic!("expected LoadPlan"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_b_returns_to_plans_from_detail() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::PlanDetail;
+        let action = app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.view_mode, ViewMode::Plans);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_handle_key_s_cycles_status() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::PlanDetail;
+        app.update_current_plan(make_plan(7, "The Plan"));
+
+        let action = app.handle_key(key(KeyCode::Char('s')));
+        match action {
+            AppAction::CycleStepStatus {
+                plan_id,
+                step_id,
+                new_status,
+            } => {
+                assert_eq!(plan_id, 7);
+                // First step is "0.1" with status Completed -> cycles to Blocked
+                assert_eq!(step_id, "0.1");
+                assert_eq!(new_status, StepStatus::Blocked);
+            }
+            _ => panic!("expected CycleStepStatus"),
+        }
+    }
+
+    #[test]
+    fn test_cycle_step_status_order() {
+        assert_eq!(cycle_step_status(StepStatus::Pending), StepStatus::InProgress);
+        assert_eq!(cycle_step_status(StepStatus::InProgress), StepStatus::Completed);
+        assert_eq!(cycle_step_status(StepStatus::Completed), StepStatus::Blocked);
+        assert_eq!(cycle_step_status(StepStatus::Blocked), StepStatus::Skipped);
+        assert_eq!(cycle_step_status(StepStatus::Skipped), StepStatus::Pending);
+    }
+
+    #[test]
+    fn test_update_projects_resets_index() {
+        let mut app = App::new();
+        app.project_index = 5;
+        app.update_projects(vec![make_project(1, "A"), make_project(2, "B")]);
+        assert_eq!(app.project_index, 0);
+        assert_eq!(app.projects.len(), 2);
+    }
+
+    #[test]
+    fn test_update_plans_resets_index() {
+        let mut app = App::new();
+        app.plan_index = 3;
+        app.update_plans(vec![make_plan(1, "Plan A")]);
+        assert_eq!(app.plan_index, 0);
+        assert_eq!(app.plans.len(), 1);
+    }
+
+    #[test]
+    fn test_visible_steps() {
+        let mut app = App::new();
+        app.update_current_plan(make_plan(1, "Test"));
+
+        let steps = app.visible_steps();
+        // Phase "Setup" has 1 step, Phase "Core" has 2 steps = 3 total
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0], (0, 0)); // Setup, step 0
+        assert_eq!(steps[1], (1, 0)); // Core, step 0
+        assert_eq!(steps[2], (1, 1)); // Core, step 1
+    }
+
+    #[test]
+    fn test_visible_steps_no_plan() {
+        let app = App::new();
+        assert!(app.visible_steps().is_empty());
+    }
+
+    #[test]
+    fn test_selected_step() {
+        let mut app = App::new();
+        app.update_current_plan(make_plan(1, "Test"));
+
+        let (phase_name, step) = app.selected_step().unwrap();
+        assert_eq!(phase_name, "Setup");
+        assert_eq!(step.id, "0.1");
+
+        app.step_index = 2;
+        let (phase_name, step) = app.selected_step().unwrap();
+        assert_eq!(phase_name, "Core");
+        assert_eq!(step.id, "1.2");
+    }
+
+    #[test]
+    fn test_selected_step_no_plan() {
+        let app = App::new();
+        assert!(app.selected_step().is_none());
+    }
+
+    #[test]
+    fn test_jk_navigation_in_plan_detail() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::PlanDetail;
+        app.update_current_plan(make_plan(1, "Nav Test"));
+
+        assert_eq!(app.step_index, 0);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.step_index, 1);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.step_index, 2);
+
+        // Wraps around
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.step_index, 0);
+
+        // k wraps the other way
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.step_index, 2);
+    }
+
+    #[test]
+    fn test_quit_from_any_view() {
+        for mode in [
+            ViewMode::Sessions,
+            ViewMode::Projects,
+            ViewMode::Plans,
+            ViewMode::PlanDetail,
+        ] {
+            let mut app = App::new();
+            app.view_mode = mode;
+            let action = app.handle_key(key(KeyCode::Char('q')));
+            assert!(app.should_quit, "q should quit from {:?}", mode);
+            assert!(matches!(action, AppAction::Quit));
+        }
+    }
+
+    #[test]
+    fn test_jk_navigation_in_projects() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        app.update_projects(vec![
+            make_project(1, "A"),
+            make_project(2, "B"),
+            make_project(3, "C"),
+        ]);
+
+        assert_eq!(app.project_index, 0);
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.project_index, 1);
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.project_index, 0);
+        // Wrap backwards
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.project_index, 2);
+    }
+
+    #[test]
+    fn test_jk_navigation_in_plans() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        app.update_plans(vec![make_plan(1, "A"), make_plan(2, "B")]);
+
+        assert_eq!(app.plan_index, 0);
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.plan_index, 1);
+        // Wrap forward
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.plan_index, 0);
     }
 }

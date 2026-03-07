@@ -1,7 +1,9 @@
 mod app;
+mod plan_view;
 mod ui;
 
-use app::App;
+use app::{App, AppAction};
+use ca_lib::db::Database;
 use ca_lib::ipc::{IpcClient, Request, Response};
 use crossterm::{
     event::{self, Event, KeyEventKind},
@@ -29,7 +31,10 @@ async fn main() -> io::Result<()> {
     let mut app = App::new();
     let ipc_client = connect_and_subscribe().await;
     app.connected = ipc_client.is_some();
-    let result = run_event_loop(&mut terminal, &mut app, ipc_client).await;
+
+    let db = open_database();
+
+    let result = run_event_loop(&mut terminal, &mut app, ipc_client, db.as_ref()).await;
 
     restore_terminal()?;
     result
@@ -39,6 +44,12 @@ fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
     Ok(())
+}
+
+fn open_database() -> Option<Database> {
+    let home = dirs::home_dir()?;
+    let db_path = home.join(".claude-admin").join("claude-admin.db");
+    Database::open(&db_path).ok()
 }
 
 /// Connect to daemon and subscribe for push updates.
@@ -59,19 +70,18 @@ async fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     mut ipc_client: Option<IpcClient>,
+    db: Option<&Database>,
 ) -> io::Result<()> {
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
-        // Check for crossterm events without blocking (zero timeout)
         if event::poll(Duration::ZERO)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    app.handle_key(key);
+                    handle_action(app.handle_key(key), app, db);
                 }
             }
         } else if let Some(client) = ipc_client.as_mut() {
-            // No terminal event ready — wait briefly for IPC or next tick
             match tokio::time::timeout(Duration::from_millis(50), client.recv_response()).await {
                 Ok(Ok(Response::SessionUpdate { sessions })) => {
                     app.update_sessions(sessions);
@@ -80,15 +90,54 @@ async fn run_event_loop(
                     ipc_client = None;
                     app.connected = false;
                 }
-                Err(_) => {} // timeout, loop back to check terminal events
+                Err(_) => {}
             }
         } else {
-            // No IPC connection — just sleep briefly to avoid busy-wait
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
         if app.should_quit {
             return Ok(());
+        }
+    }
+}
+
+fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
+    match action {
+        AppAction::None | AppAction::Quit | AppAction::SelectSession(_) => {}
+        AppAction::LoadProjects => {
+            if let Some(db) = db {
+                if let Ok(projects) = db.list_projects() {
+                    app.update_projects(projects);
+                }
+            }
+        }
+        AppAction::LoadPlans(project_id) => {
+            if let Some(db) = db {
+                if let Ok(plans) = db.list_plans_by_project(project_id) {
+                    app.update_plans(plans);
+                }
+            }
+        }
+        AppAction::LoadPlan(plan_id) => {
+            if let Some(db) = db {
+                if let Ok(Some(plan)) = db.get_plan(plan_id) {
+                    app.update_current_plan(plan);
+                }
+            }
+        }
+        AppAction::CycleStepStatus {
+            plan_id,
+            step_id,
+            new_status,
+        } => {
+            if let Some(db) = db {
+                if db.update_step_status(plan_id, &step_id, new_status).is_ok() {
+                    if let Ok(Some(plan)) = db.get_plan(plan_id) {
+                        app.update_current_plan(plan);
+                    }
+                }
+            }
         }
     }
 }

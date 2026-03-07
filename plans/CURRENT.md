@@ -120,7 +120,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/daemon/src/socket.rs (handlers)    | IPC round-trip for each new message type      |   serialize correctly
        |                               |         |                                             |                                               | Handler dispatch covers all variants
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.7  | TUI plan viewer               | Pending | C: crates/tui/src/plan_view.rs               | Open TUI, navigate to plan view               | Phase headers collapsible
+ M1.7  | TUI plan viewer               | Done    | C: crates/tui/src/plan_view.rs               | Open TUI, navigate to plan view               | Phase headers collapsible
        |                               |         | M: crates/tui/src/app.rs (ViewMode enum)     | Steps render with status indicators           | Step status indicators: o * v x -
        |                               |         | M: crates/tui/src/ui.rs (route views)        | s key cycles status, persists to DB           | Progress counter per phase
        |                               |         |                                             | b key returns to session list                 | b/Enter navigation between views

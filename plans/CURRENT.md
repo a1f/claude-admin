@@ -131,7 +131,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             | Session registered with project_id +           | tmux new-window + send-keys
        |                               |         |                                             |   plan_step_id in DB                          | Temp file for long context
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.9  | Batch execution               | Pending | C: crates/ca-lib/src/orchestrator.rs         | ca batch 1 --steps 0.1,0.2,0.3 --max 2       | Max concurrency respected
+ M1.9  | Batch execution               | Done    | C: crates/ca-lib/src/orchestrator.rs         | ca batch 1 --steps 0.1,0.2,0.3 --max 2       | Max concurrency respected
        |                               |         | M: crates/cli/src/main.rs (batch subcommand) | 2 tmux windows open (not 3)                   | Each session gets unique step context
        |                               |         |                                             | Steps marked InProgress in DB                 | suggest_parallelizable_steps: no file
        |                               |         |                                             | ca batch 1 --auto suggests groups             |   overlap = parallelizable

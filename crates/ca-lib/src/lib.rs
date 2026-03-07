@@ -8,6 +8,7 @@ pub mod hooks;
 pub mod ipc;
 pub mod migrations;
 pub mod models;
+pub mod orchestrator;
 pub mod plan;
 pub mod project;
 pub mod settings;

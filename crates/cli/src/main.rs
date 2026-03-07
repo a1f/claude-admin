@@ -95,6 +95,20 @@ pub enum Command {
         #[arg(long)]
         step: String,
     },
+    /// Batch spawn Claude sessions for multiple plan steps
+    Batch {
+        /// Plan ID
+        plan_id: i64,
+        /// Comma-separated step IDs (e.g., "0.1,0.2,1.1")
+        #[arg(long)]
+        steps: Option<String>,
+        /// Maximum concurrent sessions
+        #[arg(long, default_value = "2")]
+        max: usize,
+        /// Auto-detect parallelizable steps and show suggestions
+        #[arg(long)]
+        auto: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -200,6 +214,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Project { command } => handle_project(command),
         Command::Plan { command } => handle_plan(command),
         Command::Spawn { plan_id, step } => handle_spawn(plan_id, &step),
+        Command::Batch {
+            plan_id,
+            steps,
+            max,
+            auto,
+        } => handle_batch(plan_id, steps.as_deref(), max, auto),
     }
 }
 
@@ -568,6 +588,112 @@ fn handle_spawn(plan_id: i64, step_id: &str) -> Result<(), CliError> {
     println!("  Context: {}", context_path.display());
 
     Ok(())
+}
+
+fn handle_batch(
+    plan_id: i64,
+    steps: Option<&str>,
+    max: usize,
+    auto: bool,
+) -> Result<(), CliError> {
+    let db = open_db()?;
+
+    let plan = db
+        .get_plan(plan_id)?
+        .ok_or_else(|| CliError::NotFound(format!("plan {plan_id}")))?;
+
+    let project = db
+        .get_project(plan.project_id)?
+        .ok_or_else(|| CliError::NotFound(format!("project {}", plan.project_id)))?;
+
+    let workspace = db
+        .get_workspace(project.workspace_id)?
+        .ok_or_else(|| CliError::NotFound(format!("workspace {}", project.workspace_id)))?;
+
+    let working_dir = project
+        .worktree_path
+        .as_deref()
+        .unwrap_or(&workspace.path);
+
+    if auto {
+        let groups = ca_lib::orchestrator::suggest_parallelizable_steps(&plan);
+        println!("Suggested parallel groups for plan \"{}\":", plan.name);
+        for (i, group) in groups.iter().enumerate() {
+            println!("  Group {}: {}", i + 1, group.join(", "));
+        }
+        if groups.is_empty() {
+            println!("  No pending steps found.");
+        }
+        return Ok(());
+    }
+
+    let step_ids: Option<Vec<String>> = steps.map(|s| {
+        s.split(',').map(|id| id.trim().to_string()).collect()
+    });
+
+    let batch_steps = ca_lib::orchestrator::select_batch_steps(
+        &plan,
+        step_ids.as_deref(),
+        max,
+    )
+    .map_err(|e| CliError::InvalidInput(e.to_string()))?;
+
+    println!(
+        "Spawning {} session(s) for plan \"{}\"...",
+        batch_steps.len(),
+        plan.name
+    );
+
+    let mut spawned: Vec<(String, String)> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+
+    for step_id in &batch_steps {
+        match spawn_step_session(&db, &plan, step_id, working_dir) {
+            Ok(info) => spawned.push(info),
+            Err(e) => {
+                eprintln!("  Failed to spawn step {step_id}: {e}");
+                failed.push(step_id.clone());
+            }
+        }
+    }
+
+    println!("\nBatch spawn complete:");
+    for (sid, pane) in &spawned {
+        println!("  [ok] step {sid} -> pane {pane}");
+    }
+    for id in &failed {
+        println!("  [FAIL] step {id}");
+    }
+    println!("\n{} spawned, {} failed", spawned.len(), failed.len());
+
+    Ok(())
+}
+
+fn spawn_step_session(
+    db: &Database,
+    plan: &Plan,
+    step_id: &str,
+    working_dir: &str,
+) -> Result<(String, String), CliError> {
+    let context = ca_lib::spawn::generate_plan_context(plan, step_id)
+        .map_err(|e| CliError::InvalidInput(e.to_string()))?;
+
+    let context_path = ca_lib::spawn::write_context_file(&context)
+        .map_err(|e| CliError::Io(std::io::Error::other(e.to_string())))?;
+
+    db.update_step_status(plan.id, step_id, StepStatus::InProgress)?;
+
+    let window_name = format!("step-{step_id}");
+    let opts = ca_lib::spawn::SpawnOptions {
+        working_dir: working_dir.to_string(),
+        context_file: Some(context_path.to_string_lossy().to_string()),
+        window_name: Some(window_name),
+    };
+
+    let pane_id = ca_lib::spawn::spawn_tmux_session(&opts)
+        .map_err(|e| CliError::DaemonError(e.to_string()))?;
+
+    Ok((step_id.to_string(), pane_id))
 }
 
 fn daemon_start() -> Result<(), CliError> {
@@ -1264,6 +1390,54 @@ mod tests {
                 assert_eq!(step, "2.3");
             }
             _ => panic!("expected Spawn command"),
+        }
+    }
+
+    // -- Group 6c: Batch CLI parsing --
+
+    #[test]
+    fn test_clap_batch_parses() {
+        let cli = Cli::parse_from([
+            "claude-admin",
+            "batch",
+            "1",
+            "--steps",
+            "0.1,0.2",
+            "--max",
+            "3",
+        ]);
+        match cli.command {
+            Command::Batch {
+                plan_id,
+                steps,
+                max,
+                auto,
+            } => {
+                assert_eq!(plan_id, 1);
+                assert_eq!(steps, Some("0.1,0.2".to_string()));
+                assert_eq!(max, 3);
+                assert!(!auto);
+            }
+            _ => panic!("expected Batch command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_batch_auto_parses() {
+        let cli = Cli::parse_from(["claude-admin", "batch", "1", "--auto"]);
+        match cli.command {
+            Command::Batch {
+                plan_id,
+                steps,
+                max,
+                auto,
+            } => {
+                assert_eq!(plan_id, 1);
+                assert!(steps.is_none());
+                assert_eq!(max, 2); // default
+                assert!(auto);
+            }
+            _ => panic!("expected Batch command"),
         }
     }
 

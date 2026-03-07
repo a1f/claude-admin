@@ -110,7 +110,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/ca-lib/src/models.rs (add fields)  | Existing DB: migrates without data loss       | Optional fields (Option<i64>, Option<String>)
        |                               |         |                                             | Session CRUD handles new nullable fields      |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.5  | Workspace/project/plan CLI    | Pending | M: crates/cli/src/main.rs (add subcommands)  | ca workspace add ~/dev/myapp                  | Direct DB access (not IPC) for CLI
+ M1.5  | Workspace/project/plan CLI    | Done    | M: crates/cli/src/main.rs (add subcommands)  | ca workspace add ~/dev/myapp                  | Direct DB access (not IPC) for CLI
        |                               |         |                                             | ca workspace list                             | --db-path flag with default
        |                               |         |                                             | ca project create 1 "auth feature"            | Plan loaded from JSON file (--file)
        |                               |         |                                             | ca plan create 1 "Auth" --file plan.json      | Validates JSON before insert

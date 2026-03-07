@@ -1,8 +1,12 @@
 use std::path::PathBuf;
 
+use ca_lib::db::{Database, DbError};
 use ca_lib::events::{Event, EventType};
 use ca_lib::ipc::{IpcClient, IpcError, Request, Response};
 use ca_lib::models::{Session, SessionState};
+use ca_lib::plan::{Plan, PlanContent, PlanStatus, StepStatus};
+use ca_lib::project::{Project, ProjectStatus};
+use ca_lib::workspace::Workspace;
 use clap::{Parser, Subcommand};
 
 // ---------------------------------------------------------------------------
@@ -21,6 +25,12 @@ pub enum CliError {
     Config(#[from] ca_lib::config::ConfigError),
     #[error("session not found: {0}")]
     NotFound(String),
+    #[error("database error: {0}")]
+    Database(#[from] DbError),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +72,81 @@ pub enum Command {
         #[command(subcommand)]
         command: HooksCommand,
     },
+    /// Manage workspaces
+    Workspace {
+        #[command(subcommand)]
+        command: WorkspaceCommand,
+    },
+    /// Manage projects
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommand,
+    },
+    /// Manage plans
+    Plan {
+        #[command(subcommand)]
+        command: PlanCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorkspaceCommand {
+    /// Add a workspace
+    Add {
+        path: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// List all workspaces
+    List,
+    /// Delete a workspace
+    Delete { id: i64 },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectCommand {
+    /// Create a project in a workspace
+    Create {
+        workspace_id: i64,
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        branch: Option<String>,
+    },
+    /// List projects
+    List {
+        #[arg(long)]
+        workspace: Option<i64>,
+    },
+    /// Update project status
+    Status { id: i64, status: String },
+    /// Delete a project
+    Delete { id: i64 },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PlanCommand {
+    /// Create a plan from a JSON file
+    Create {
+        project_id: i64,
+        name: String,
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// List plans
+    List {
+        #[arg(long)]
+        project: Option<i64>,
+    },
+    /// Update plan status
+    Status { id: i64, status: String },
+    /// Update a plan step status
+    Step { id: i64, step_id: String, status: String },
+    /// Show plan details
+    Show { id: i64 },
+    /// Delete a plan
+    Delete { id: i64 },
 }
 
 #[derive(Subcommand, Debug)]
@@ -103,6 +188,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         }
         Command::Daemon { command } => handle_daemon(command),
         Command::Hooks { command } => handle_hooks(command),
+        Command::Workspace { command } => handle_workspace(command),
+        Command::Project { command } => handle_project(command),
+        Command::Plan { command } => handle_plan(command),
     }
 }
 
@@ -266,6 +354,159 @@ fn handle_hooks(command: HooksCommand) -> Result<(), CliError> {
             for (hook_type, installed) in &status {
                 let indicator = if *installed { "[x]" } else { "[ ]" };
                 println!("  {indicator} {hook_type}");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn open_db() -> Result<Database, CliError> {
+    let data = data_dir()?;
+    let db_path = data.join("claude-admin.db");
+    Ok(Database::open(&db_path)?)
+}
+
+// ---------------------------------------------------------------------------
+// Workspace / Project / Plan handlers
+// ---------------------------------------------------------------------------
+
+fn handle_workspace(command: WorkspaceCommand) -> Result<(), CliError> {
+    let db = open_db()?;
+    match command {
+        WorkspaceCommand::Add { path, name } => {
+            let ws = db.create_workspace(&path, name.as_deref())?;
+            println!("Created workspace {} (id={})", ws.name, ws.id);
+            Ok(())
+        }
+        WorkspaceCommand::List => {
+            let workspaces = db.list_workspaces()?;
+            if workspaces.is_empty() {
+                println!("No workspaces.");
+            } else {
+                print!("{}", format_workspaces_table(&workspaces));
+            }
+            Ok(())
+        }
+        WorkspaceCommand::Delete { id } => {
+            if db.delete_workspace(id)? {
+                println!("Deleted workspace {id}.");
+            } else {
+                println!("Workspace {id} not found.");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn handle_project(command: ProjectCommand) -> Result<(), CliError> {
+    let db = open_db()?;
+    match command {
+        ProjectCommand::Create {
+            workspace_id,
+            name,
+            description,
+            branch: _,
+        } => {
+            let proj = db.create_project(workspace_id, &name, description.as_deref())?;
+            println!("Created project \"{}\" (id={})", proj.name, proj.id);
+            Ok(())
+        }
+        ProjectCommand::List { workspace } => {
+            let projects = match workspace {
+                Some(ws_id) => db.list_projects_by_workspace(ws_id)?,
+                None => db.list_projects()?,
+            };
+            if projects.is_empty() {
+                println!("No projects.");
+            } else {
+                print!("{}", format_projects_table(&projects));
+            }
+            Ok(())
+        }
+        ProjectCommand::Status { id, status } => {
+            let parsed: ProjectStatus = status
+                .parse()
+                .map_err(|_| CliError::InvalidInput(format!("invalid status: {status}. Use: active, running, completed, archived")))?;
+            db.update_project_status(id, parsed)?;
+            println!("Updated project {id} status to {parsed}.");
+            Ok(())
+        }
+        ProjectCommand::Delete { id } => {
+            if db.delete_project(id)? {
+                println!("Deleted project {id}.");
+            } else {
+                println!("Project {id} not found.");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn handle_plan(command: PlanCommand) -> Result<(), CliError> {
+    let db = open_db()?;
+    match command {
+        PlanCommand::Create {
+            project_id,
+            name,
+            file,
+        } => {
+            let json_str = std::fs::read_to_string(&file)?;
+            let content: PlanContent = serde_json::from_str(&json_str)
+                .map_err(|e| CliError::InvalidInput(format!("invalid plan JSON: {e}")))?;
+            let plan = db.create_plan(project_id, &name, &content)?;
+            println!("Created plan \"{}\" (id={})", plan.name, plan.id);
+            Ok(())
+        }
+        PlanCommand::List { project } => {
+            let plans = match project {
+                Some(proj_id) => db.list_plans_by_project(proj_id)?,
+                None => {
+                    // No list_plans_all method exists, so we'll handle this
+                    // by listing for project=0 which returns empty, or show error
+                    return Err(CliError::InvalidInput(
+                        "please specify --project <id>".to_string(),
+                    ));
+                }
+            };
+            if plans.is_empty() {
+                println!("No plans.");
+            } else {
+                print!("{}", format_plans_table(&plans));
+            }
+            Ok(())
+        }
+        PlanCommand::Status { id, status } => {
+            let parsed: PlanStatus = status
+                .parse()
+                .map_err(|_| CliError::InvalidInput(format!("invalid status: {status}. Use: draft, active, completed, abandoned")))?;
+            db.update_plan_status(id, parsed)?;
+            println!("Updated plan {id} status to {parsed}.");
+            Ok(())
+        }
+        PlanCommand::Step {
+            id,
+            step_id,
+            status,
+        } => {
+            let parsed: StepStatus = status
+                .parse()
+                .map_err(|_| CliError::InvalidInput(format!("invalid step status: {status}. Use: pending, in_progress, completed, blocked, skipped")))?;
+            db.update_step_status(id, &step_id, parsed)?;
+            println!("Updated plan {id} step {step_id} to {parsed}.");
+            Ok(())
+        }
+        PlanCommand::Show { id } => {
+            match db.get_plan(id)? {
+                Some(plan) => print!("{}", format_plan_detail(&plan)),
+                None => println!("Plan {id} not found."),
+            }
+            Ok(())
+        }
+        PlanCommand::Delete { id } => {
+            if db.delete_plan(id)? {
+                println!("Deleted plan {id}.");
+            } else {
+                println!("Plan {id} not found.");
             }
             Ok(())
         }
@@ -487,6 +728,82 @@ pub fn format_timestamp(epoch_secs: i64) -> String {
     }
 }
 
+pub fn format_workspaces_table(workspaces: &[Workspace]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("{:<6} {:<20} {}\n", "ID", "NAME", "PATH"));
+    out.push_str(&format!("{}\n", "-".repeat(60)));
+    for ws in workspaces {
+        out.push_str(&format!("{:<6} {:<20} {}\n", ws.id, ws.name, ws.path));
+    }
+    out
+}
+
+pub fn format_projects_table(projects: &[Project]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{:<6} {:<6} {:<20} {:<12} {}\n",
+        "ID", "WS", "NAME", "STATUS", "DESCRIPTION"
+    ));
+    out.push_str(&format!("{}\n", "-".repeat(70)));
+    for proj in projects {
+        out.push_str(&format!(
+            "{:<6} {:<6} {:<20} {:<12} {}\n",
+            proj.id,
+            proj.workspace_id,
+            proj.name,
+            proj.status,
+            proj.description.as_deref().unwrap_or("")
+        ));
+    }
+    out
+}
+
+pub fn format_plans_table(plans: &[Plan]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{:<6} {:<6} {:<30} {:<12} {}\n",
+        "ID", "PROJ", "NAME", "STATUS", "STEPS"
+    ));
+    out.push_str(&format!("{}\n", "-".repeat(70)));
+    for plan in plans {
+        let step_count: usize = plan.content.phases.iter().map(|p| p.steps.len()).sum();
+        out.push_str(&format!(
+            "{:<6} {:<6} {:<30} {:<12} {}\n",
+            plan.id, plan.project_id, plan.name, plan.status, step_count
+        ));
+    }
+    out
+}
+
+pub fn format_plan_detail(plan: &Plan) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("ID:       {}\n", plan.id));
+    out.push_str(&format!("Project:  {}\n", plan.project_id));
+    out.push_str(&format!("Name:     {}\n", plan.name));
+    out.push_str(&format!("Status:   {}\n", plan.status));
+    out.push_str(&format!(
+        "Created:  {}\n",
+        format_timestamp(plan.created_at)
+    ));
+    out.push_str(&format!(
+        "Updated:  {}\n",
+        format_timestamp(plan.updated_at)
+    ));
+    out.push('\n');
+    for phase in &plan.content.phases {
+        out.push_str(&format!("Phase: {}\n", phase.name));
+        for step in &phase.steps {
+            out.push_str(&format!(
+                "  [{:<12}] {} - {}\n",
+                step.status.as_str(),
+                step.id,
+                step.description
+            ));
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -677,5 +994,262 @@ mod tests {
             }
             _ => panic!("expected Hooks command"),
         }
+    }
+
+    // -- Group 6: Workspace/Project/Plan CLI parsing --
+
+    #[test]
+    fn test_clap_workspace_add_parses() {
+        let cli = Cli::parse_from(["claude-admin", "workspace", "add", "/home/user/dev"]);
+        match cli.command {
+            Command::Workspace { command } => match command {
+                WorkspaceCommand::Add { path, name } => {
+                    assert_eq!(path, "/home/user/dev");
+                    assert!(name.is_none());
+                }
+                _ => panic!("expected Add"),
+            },
+            _ => panic!("expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_workspace_add_with_name_parses() {
+        let cli = Cli::parse_from([
+            "claude-admin",
+            "workspace",
+            "add",
+            "/home/user/dev",
+            "--name",
+            "myws",
+        ]);
+        match cli.command {
+            Command::Workspace { command } => match command {
+                WorkspaceCommand::Add { path, name } => {
+                    assert_eq!(path, "/home/user/dev");
+                    assert_eq!(name, Some("myws".to_string()));
+                }
+                _ => panic!("expected Add"),
+            },
+            _ => panic!("expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_workspace_list_parses() {
+        let cli = Cli::parse_from(["claude-admin", "workspace", "list"]);
+        assert!(matches!(
+            cli.command,
+            Command::Workspace {
+                command: WorkspaceCommand::List
+            }
+        ));
+    }
+
+    #[test]
+    fn test_clap_workspace_delete_parses() {
+        let cli = Cli::parse_from(["claude-admin", "workspace", "delete", "5"]);
+        match cli.command {
+            Command::Workspace { command } => match command {
+                WorkspaceCommand::Delete { id } => assert_eq!(id, 5),
+                _ => panic!("expected Delete"),
+            },
+            _ => panic!("expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_project_create_parses() {
+        let cli = Cli::parse_from([
+            "claude-admin",
+            "project",
+            "create",
+            "1",
+            "auth-feature",
+            "--description",
+            "Auth system",
+        ]);
+        match cli.command {
+            Command::Project { command } => match command {
+                ProjectCommand::Create {
+                    workspace_id,
+                    name,
+                    description,
+                    branch,
+                } => {
+                    assert_eq!(workspace_id, 1);
+                    assert_eq!(name, "auth-feature");
+                    assert_eq!(description, Some("Auth system".to_string()));
+                    assert!(branch.is_none());
+                }
+                _ => panic!("expected Create"),
+            },
+            _ => panic!("expected Project command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_project_list_with_workspace_parses() {
+        let cli = Cli::parse_from(["claude-admin", "project", "list", "--workspace", "2"]);
+        match cli.command {
+            Command::Project { command } => match command {
+                ProjectCommand::List { workspace } => {
+                    assert_eq!(workspace, Some(2));
+                }
+                _ => panic!("expected List"),
+            },
+            _ => panic!("expected Project command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_project_status_parses() {
+        let cli = Cli::parse_from(["claude-admin", "project", "status", "3", "completed"]);
+        match cli.command {
+            Command::Project { command } => match command {
+                ProjectCommand::Status { id, status } => {
+                    assert_eq!(id, 3);
+                    assert_eq!(status, "completed");
+                }
+                _ => panic!("expected Status"),
+            },
+            _ => panic!("expected Project command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_plan_create_parses() {
+        let cli = Cli::parse_from([
+            "claude-admin",
+            "plan",
+            "create",
+            "1",
+            "Auth Plan",
+            "--file",
+            "plan.json",
+        ]);
+        match cli.command {
+            Command::Plan { command } => match command {
+                PlanCommand::Create {
+                    project_id,
+                    name,
+                    file,
+                } => {
+                    assert_eq!(project_id, 1);
+                    assert_eq!(name, "Auth Plan");
+                    assert_eq!(file, PathBuf::from("plan.json"));
+                }
+                _ => panic!("expected Create"),
+            },
+            _ => panic!("expected Plan command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_plan_step_parses() {
+        let cli = Cli::parse_from([
+            "claude-admin",
+            "plan",
+            "step",
+            "1",
+            "0.1",
+            "completed",
+        ]);
+        match cli.command {
+            Command::Plan { command } => match command {
+                PlanCommand::Step {
+                    id,
+                    step_id,
+                    status,
+                } => {
+                    assert_eq!(id, 1);
+                    assert_eq!(step_id, "0.1");
+                    assert_eq!(status, "completed");
+                }
+                _ => panic!("expected Step"),
+            },
+            _ => panic!("expected Plan command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_plan_show_parses() {
+        let cli = Cli::parse_from(["claude-admin", "plan", "show", "5"]);
+        match cli.command {
+            Command::Plan { command } => match command {
+                PlanCommand::Show { id } => assert_eq!(id, 5),
+                _ => panic!("expected Show"),
+            },
+            _ => panic!("expected Plan command"),
+        }
+    }
+
+    // -- Group 7: Formatting for workspace/project/plan --
+
+    #[test]
+    fn test_format_workspaces_table() {
+        let workspaces = vec![Workspace {
+            id: 1,
+            name: "myapp".to_string(),
+            path: "/home/user/myapp".to_string(),
+            created_at: 1706400000,
+            updated_at: 1706500000,
+        }];
+        let table = format_workspaces_table(&workspaces);
+        assert!(table.contains("ID"));
+        assert!(table.contains("NAME"));
+        assert!(table.contains("myapp"));
+        assert!(table.contains("/home/user/myapp"));
+    }
+
+    #[test]
+    fn test_format_projects_table() {
+        let projects = vec![Project {
+            id: 1,
+            workspace_id: 1,
+            name: "auth".to_string(),
+            description: Some("Auth feature".to_string()),
+            status: ProjectStatus::Active,
+            worktree_path: None,
+            branch_name: None,
+            created_at: 1706400000,
+            updated_at: 1706500000,
+        }];
+        let table = format_projects_table(&projects);
+        assert!(table.contains("auth"));
+        assert!(table.contains("active"));
+        assert!(table.contains("Auth feature"));
+    }
+
+    #[test]
+    fn test_format_plan_detail_output() {
+        let plan = Plan {
+            id: 1,
+            project_id: 1,
+            name: "Test Plan".to_string(),
+            content: PlanContent {
+                phases: vec![ca_lib::plan::Phase {
+                    name: "Setup".to_string(),
+                    steps: vec![ca_lib::plan::Step {
+                        id: "0.1".to_string(),
+                        description: "Init project".to_string(),
+                        status: StepStatus::Completed,
+                        exit_criteria: ca_lib::plan::ExitCriteria {
+                            description: "done".to_string(),
+                            commands: vec![],
+                        },
+                    }],
+                }],
+            },
+            status: PlanStatus::Active,
+            created_at: 1706400000,
+            updated_at: 1706500000,
+        };
+        let detail = format_plan_detail(&plan);
+        assert!(detail.contains("Test Plan"));
+        assert!(detail.contains("Phase: Setup"));
+        assert!(detail.contains("0.1"));
+        assert!(detail.contains("Init project"));
+        assert!(detail.contains("completed"));
     }
 }

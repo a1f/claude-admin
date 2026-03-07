@@ -46,6 +46,7 @@ impl Database {
 
         db.init_schema()?;
         crate::migrations::run_migrations(&db.conn)?;
+        db.ensure_defaults()?;
 
         Ok(db)
     }
@@ -118,6 +119,12 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_plans_project_id ON plans(project_id);
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
             "#,
         )?;
 

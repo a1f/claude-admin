@@ -147,7 +147,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod git)    | git -C ~/dev/myapp worktree list              | Archive/delete removes worktree
        |                               |         |                                             | ca project archive 1 -> worktree removed      |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.12 | Settings key-value store      | Pending | C: crates/ca-lib/src/settings.rs             | cargo test -p ca-lib settings::tests          | UPSERT via INSERT OR REPLACE
+ M1.12 | Settings key-value store      | Done    | C: crates/ca-lib/src/settings.rs             | cargo test -p ca-lib settings::tests          | UPSERT via INSERT OR REPLACE
        |                               |         | M: crates/ca-lib/src/db.rs (schema)          | Defaults populated on first init              | ensure_defaults idempotent
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        | get/set/list all work                         | Settings: poll_interval, max_sessions,
        |                               |         |                                             |                                               |   worktree patterns, notifications

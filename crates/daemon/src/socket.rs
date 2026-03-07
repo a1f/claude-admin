@@ -135,6 +135,11 @@ pub async fn handle_connection(
 
         if matches!(request, Request::Subscribe) {
             conn.send(&Response::Subscribed).await?;
+            // Send current sessions so subscriber doesn't start empty
+            let sessions = run_db(Arc::clone(&db), |db| db.list_sessions())
+                .await
+                .unwrap_or_else(|_| Vec::new());
+            conn.send(&Response::SessionUpdate { sessions }).await?;
             return handle_subscriber(conn, update_tx.subscribe()).await;
         }
 
@@ -661,6 +666,12 @@ mod tests {
         let resp: Response = serde_json::from_str(response.trim()).unwrap();
         assert_eq!(resp, Response::Subscribed);
 
+        // Consume the initial session snapshot push
+        let mut initial = String::new();
+        reader.read_line(&mut initial).await.unwrap();
+        let initial_resp: Response = serde_json::from_str(initial.trim()).unwrap();
+        assert!(matches!(initial_resp, Response::SessionUpdate { .. }));
+
         drop(write_half);
         drop(reader);
 
@@ -704,11 +715,19 @@ mod tests {
         let resp: Response = serde_json::from_str(line.trim()).unwrap();
         assert_eq!(resp, Response::Subscribed);
 
+        // Consume initial session snapshot (empty DB)
+        let mut initial = String::new();
+        reader.read_line(&mut initial).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Response>(initial.trim()).unwrap(),
+            Response::SessionUpdate { .. }
+        ));
+
         // Broadcast a session update
         let sessions = vec![create_test_session("sess-1", "%0")];
         update_tx.send(sessions.clone()).unwrap();
 
-        // Read the push
+        // Read the broadcast push
         let mut push_line = String::new();
         reader.read_line(&mut push_line).await.unwrap();
         let push: Response = serde_json::from_str(push_line.trim()).unwrap();
@@ -766,6 +785,14 @@ mod tests {
             serde_json::from_str::<Response>(line.trim()).unwrap(),
             Response::Subscribed
         );
+
+        // Consume initial session snapshot
+        let mut initial = String::new();
+        reader.read_line(&mut initial).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Response>(initial.trim()).unwrap(),
+            Response::SessionUpdate { .. }
+        ));
 
         // Drop client connection
         drop(write_half);
@@ -836,6 +863,14 @@ mod tests {
             Response::Subscribed
         );
 
+        // Consume initial snapshot for sub1
+        let mut init1 = String::new();
+        reader1.read_line(&mut init1).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Response>(init1.trim()).unwrap(),
+            Response::SessionUpdate { .. }
+        ));
+
         // Connect second subscriber
         let stream2 = UnixStream::connect(&socket_path).await.unwrap();
         let (r2, mut w2) = tokio::io::split(stream2);
@@ -852,6 +887,14 @@ mod tests {
             Response::Subscribed
         );
 
+        // Consume initial snapshot for sub2
+        let mut init2 = String::new();
+        reader2.read_line(&mut init2).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Response>(init2.trim()).unwrap(),
+            Response::SessionUpdate { .. }
+        ));
+
         // Wait for accept_task to finish spawning both handlers
         let (server_task1, server_task2) = tokio::time::timeout(
             std::time::Duration::from_secs(2),
@@ -865,7 +908,7 @@ mod tests {
         let sessions = vec![create_test_session("sess-x", "%5")];
         update_tx.send(sessions).unwrap();
 
-        // Both should receive the update
+        // Both should receive the broadcast update
         let mut push1 = String::new();
         reader1.read_line(&mut push1).await.unwrap();
         let resp1: Response = serde_json::from_str(push1.trim()).unwrap();

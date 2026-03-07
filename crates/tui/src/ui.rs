@@ -11,9 +11,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     if app.sessions.is_empty() {
-        let msg = Paragraph::new("No sessions found. Waiting for data...")
+        let msg = if app.connected {
+            "No sessions found. Waiting for data..."
+        } else {
+            "Not connected to daemon. Is it running? (claude-admin daemon start)"
+        };
+        let block = Paragraph::new(msg)
             .block(Block::default().title(" claude-admin ").borders(Borders::ALL));
-        frame.render_widget(msg, area);
+        frame.render_widget(block, area);
         return;
     }
 

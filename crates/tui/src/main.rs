@@ -3,7 +3,6 @@ mod ui;
 
 use app::App;
 use ca_lib::ipc::{IpcClient, Request, Response};
-use ca_lib::models::Session;
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
@@ -29,6 +28,7 @@ async fn main() -> io::Result<()> {
 
     let mut app = App::new();
     let ipc_client = connect_and_subscribe().await;
+    app.connected = ipc_client.is_some();
     let result = run_event_loop(&mut terminal, &mut app, ipc_client).await;
 
     restore_terminal()?;
@@ -55,59 +55,40 @@ async fn connect_and_subscribe() -> Option<IpcClient> {
     }
 }
 
-enum IpcEvent {
-    Update(Vec<Session>),
-    Disconnected,
-}
-
-async fn recv_ipc_event(client: &mut IpcClient) -> IpcEvent {
-    match client.recv_response().await {
-        Ok(Response::SessionUpdate { sessions }) => IpcEvent::Update(sessions),
-        _ => IpcEvent::Disconnected,
-    }
-}
-
 async fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     mut ipc_client: Option<IpcClient>,
 ) -> io::Result<()> {
-    let poll_duration = Duration::from_millis(50);
-
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
-        tokio::select! {
-            terminal_event = poll_crossterm_event(poll_duration) => {
-                if let Some(Event::Key(key)) = terminal_event? {
-                    if key.kind == KeyEventKind::Press {
-                        app.handle_key(key);
-                    }
+        // Check for crossterm events without blocking (zero timeout)
+        if event::poll(Duration::ZERO)? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    app.handle_key(key);
                 }
             }
-
-            // Only active when we have an IPC connection
-            event = async { recv_ipc_event(ipc_client.as_mut().unwrap()).await },
-                if ipc_client.is_some() =>
-            {
-                match event {
-                    IpcEvent::Update(sessions) => app.update_sessions(sessions),
-                    IpcEvent::Disconnected => { ipc_client = None; }
+        } else if let Some(client) = ipc_client.as_mut() {
+            // No terminal event ready — wait briefly for IPC or next tick
+            match tokio::time::timeout(Duration::from_millis(50), client.recv_response()).await {
+                Ok(Ok(Response::SessionUpdate { sessions })) => {
+                    app.update_sessions(sessions);
                 }
+                Ok(Ok(_)) | Ok(Err(_)) => {
+                    ipc_client = None;
+                    app.connected = false;
+                }
+                Err(_) => {} // timeout, loop back to check terminal events
             }
+        } else {
+            // No IPC connection — just sleep briefly to avoid busy-wait
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
         if app.should_quit {
             return Ok(());
         }
-    }
-}
-
-/// Poll crossterm for a terminal event, yielding to tokio between checks.
-async fn poll_crossterm_event(timeout: Duration) -> io::Result<Option<Event>> {
-    if event::poll(timeout)? {
-        Ok(Some(event::read()?))
-    } else {
-        Ok(None)
     }
 }

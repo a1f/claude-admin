@@ -13,6 +13,7 @@ pub struct App {
     pub selected_index: usize,
     pub should_quit: bool,
     pub preview_events: Vec<Event>,
+    pub connected: bool,
 }
 
 impl App {
@@ -22,6 +23,7 @@ impl App {
             selected_index: 0,
             should_quit: false,
             preview_events: Vec::new(),
+            connected: false,
         }
     }
 

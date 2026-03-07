@@ -105,7 +105,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             |   + active plan query                         | StepStatus/PlanStatus enums with serde
        |                               |         |                                             |                                               | ExitCriteria: commands[] + description
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.4  | Schema migrations + session   | Pending | C: crates/ca-lib/src/migrations.rs           | cargo test --workspace (all existing pass)    | schema_version table for tracking
+ M1.4  | Schema migrations + session   | Done    | C: crates/ca-lib/src/migrations.rs           | cargo test --workspace (all existing pass)    | schema_version table for tracking
        | linking to projects           |         | M: crates/ca-lib/src/db.rs (call migrations) | New DB: has project_id/plan_step_id cols      | ALTER TABLE sessions ADD COLUMN safe
        |                               |         | M: crates/ca-lib/src/models.rs (add fields)  | Existing DB: migrates without data loss       | Optional fields (Option<i64>, Option<String>)
        |                               |         |                                             | Session CRUD handles new nullable fields      |

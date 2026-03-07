@@ -115,6 +115,8 @@ mod tests {
             last_activity: 0,
             created_at: 0,
             updated_at: 0,
+            project_id: None,
+            plan_step_id: None,
         }
     }
 

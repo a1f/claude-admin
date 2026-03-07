@@ -45,6 +45,7 @@ impl Database {
         };
 
         db.init_schema()?;
+        crate::migrations::run_migrations(&db.conn)?;
 
         Ok(db)
     }
@@ -63,7 +64,9 @@ impl Database {
                 detection_method TEXT NOT NULL,
                 last_activity INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                project_id INTEGER,
+                plan_step_id TEXT
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -146,8 +149,8 @@ impl Database {
             INSERT INTO sessions (
                 id, pane_id, session_name, window_index, pane_index,
                 working_dir, state, detection_method, last_activity,
-                created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                created_at, updated_at, project_id, plan_step_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 session.id,
@@ -161,6 +164,8 @@ impl Database {
                 session.last_activity,
                 session.created_at,
                 session.updated_at,
+                session.project_id,
+                session.plan_step_id,
             ],
         )?;
         Ok(())
@@ -173,7 +178,7 @@ impl Database {
                 r#"
                 SELECT id, pane_id, session_name, window_index, pane_index,
                        working_dir, state, detection_method, last_activity,
-                       created_at, updated_at
+                       created_at, updated_at, project_id, plan_step_id
                 FROM sessions WHERE id = ?1
                 "#,
                 params![id],
@@ -195,7 +200,7 @@ impl Database {
                 r#"
                 SELECT id, pane_id, session_name, window_index, pane_index,
                        working_dir, state, detection_method, last_activity,
-                       created_at, updated_at
+                       created_at, updated_at, project_id, plan_step_id
                 FROM sessions WHERE pane_id = ?1
                 "#,
                 params![pane_id],
@@ -222,7 +227,9 @@ impl Database {
                 state = ?7,
                 detection_method = ?8,
                 last_activity = ?9,
-                updated_at = ?10
+                updated_at = ?10,
+                project_id = ?11,
+                plan_step_id = ?12
             WHERE id = ?1
             "#,
             params![
@@ -236,6 +243,8 @@ impl Database {
                 session.detection_method,
                 session.last_activity,
                 session.updated_at,
+                session.project_id,
+                session.plan_step_id,
             ],
         )?;
         Ok(())
@@ -265,7 +274,7 @@ impl Database {
             r#"
             SELECT id, pane_id, session_name, window_index, pane_index,
                    working_dir, state, detection_method, last_activity,
-                   created_at, updated_at
+                   created_at, updated_at, project_id, plan_step_id
             FROM sessions
             ORDER BY created_at DESC
             "#,
@@ -306,6 +315,8 @@ impl Database {
             last_activity: row.get(8)?,
             created_at: row.get(9)?,
             updated_at: row.get(10)?,
+            project_id: row.get(11)?,
+            plan_step_id: row.get(12)?,
         }))
     }
 
@@ -434,6 +445,8 @@ mod tests {
             last_activity: 1706500000,
             created_at: 1706400000,
             updated_at: 1706500000,
+            project_id: None,
+            plan_step_id: None,
         }
     }
 
@@ -790,5 +803,32 @@ mod tests {
         let retrieved_payload = event.payload.as_ref().unwrap();
         assert_eq!(retrieved_payload["hook"], "PostToolUse");
         assert_eq!(retrieved_payload["tool"], "Edit");
+    }
+
+    #[test]
+    fn test_session_with_project_link() {
+        let (db, _dir) = create_test_db();
+        let mut session = create_test_session("sess-proj", "%10");
+        session.project_id = Some(7);
+
+        db.create_session(&session).unwrap();
+
+        let retrieved = db.get_session("sess-proj").unwrap().unwrap();
+        assert_eq!(retrieved.project_id, Some(7));
+        assert_eq!(retrieved.plan_step_id, None);
+    }
+
+    #[test]
+    fn test_session_with_plan_step() {
+        let (db, _dir) = create_test_db();
+        let mut session = create_test_session("sess-step", "%11");
+        session.project_id = Some(3);
+        session.plan_step_id = Some("2.1".to_string());
+
+        db.create_session(&session).unwrap();
+
+        let retrieved = db.get_session("sess-step").unwrap().unwrap();
+        assert_eq!(retrieved.project_id, Some(3));
+        assert_eq!(retrieved.plan_step_id, Some("2.1".to_string()));
     }
 }

@@ -86,6 +86,8 @@ mod tests {
             last_activity: 1706500000,
             created_at: 1706400000,
             updated_at: 1706500000,
+            project_id: None,
+            plan_step_id: None,
         }
     }
 

@@ -165,6 +165,8 @@ pub fn sync_sessions(db: &Database) -> Result<SyncResult, DiscoveryError> {
                     last_activity: now,
                     created_at: now,
                     updated_at: now,
+                    project_id: None,
+                    plan_step_id: None,
                 };
 
                 db.create_session(&session)?;
@@ -245,6 +247,8 @@ mod tests {
             last_activity: 1706500000,
             created_at: 1706400000,
             updated_at: 1706500000,
+            project_id: None,
+            plan_step_id: None,
         }
     }
 

@@ -5,6 +5,7 @@ pub mod events;
 pub mod hook_install;
 pub mod hooks;
 pub mod ipc;
+pub mod migrations;
 pub mod models;
 pub mod plan;
 pub mod project;

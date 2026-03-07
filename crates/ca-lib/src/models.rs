@@ -66,6 +66,8 @@ pub struct Session {
     pub last_activity: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    pub project_id: Option<i64>,
+    pub plan_step_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -157,6 +159,8 @@ mod tests {
             last_activity: 1706500000,
             created_at: 1706400000,
             updated_at: 1706500000,
+            project_id: Some(42),
+            plan_step_id: Some("1.3".to_string()),
         };
 
         let json = serde_json::to_string(&session).unwrap();
@@ -178,10 +182,14 @@ mod tests {
             last_activity: 100,
             created_at: 50,
             updated_at: 100,
+            project_id: Some(5),
+            plan_step_id: Some("0.1".to_string()),
         };
 
         let json = serde_json::to_string_pretty(&session).unwrap();
         assert!(json.contains("\"state\": \"idle\""));
         assert!(json.contains("\"pane_id\": \"%0\""));
+        assert!(json.contains("\"project_id\": 5"));
+        assert!(json.contains("\"plan_step_id\": \"0.1\""));
     }
 }

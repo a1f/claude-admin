@@ -116,7 +116,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             | ca plan create 1 "Auth" --file plan.json      | Validates JSON before insert
        |                               |         |                                             | ca plan step 1 "0.1" completed                | Human-readable output tables
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.6  | Workspace/project/plan IPC    | Pending | M: crates/ca-lib/src/ipc.rs (new variants)   | cargo test --workspace                        | All new Request/Response variants
+ M1.6  | Workspace/project/plan IPC    | Done    | M: crates/ca-lib/src/ipc.rs (new variants)   | cargo test --workspace                        | All new Request/Response variants
        |                               |         | M: crates/daemon/src/socket.rs (handlers)    | IPC round-trip for each new message type      |   serialize correctly
        |                               |         |                                             |                                               | Handler dispatch covers all variants
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------

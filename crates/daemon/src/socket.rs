@@ -2,6 +2,8 @@ use ca_lib::db::Database;
 use ca_lib::hooks::apply_hook_event;
 use ca_lib::ipc::{Request, Response};
 use ca_lib::models::Session;
+use ca_lib::plan::{PlanStatus, StepStatus};
+use ca_lib::project::ProjectStatus;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -248,6 +250,136 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
 
         // Handled before dispatch in handle_connection; included for exhaustiveness
         Request::Subscribe => Response::Subscribed,
+
+        Request::ListWorkspaces => run_db(db, |db| db.list_workspaces())
+            .await
+            .map(|workspaces| Response::WorkspaceList { workspaces })
+            .unwrap_or_else(|e| Response::Error { message: e }),
+
+        Request::CreateWorkspace { path, name } => {
+            run_db(db, move |db| db.create_workspace(&path, name.as_deref()))
+                .await
+                .map(|workspace| Response::WorkspaceCreated { workspace })
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::DeleteWorkspace { id } => {
+            run_db(db, move |db| db.delete_workspace(id))
+                .await
+                .map(|_| Response::Ok)
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::ListProjects { workspace_id } => {
+            run_db(db, move |db| match workspace_id {
+                Some(ws_id) => db.list_projects_by_workspace(ws_id),
+                None => db.list_projects(),
+            })
+            .await
+            .map(|projects| Response::ProjectList { projects })
+            .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::CreateProject {
+            workspace_id,
+            name,
+            description,
+        } => {
+            run_db(db, move |db| {
+                db.create_project(workspace_id, &name, description.as_deref())
+            })
+            .await
+            .map(|project| Response::ProjectCreated { project })
+            .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::UpdateProjectStatus { id, status } => {
+            let parsed = match status.parse::<ProjectStatus>() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Response::Error {
+                        message: format!("invalid project status: {status}"),
+                    }
+                }
+            };
+            run_db(db, move |db| db.update_project_status(id, parsed))
+                .await
+                .map(|_| Response::Ok)
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::DeleteProject { id } => {
+            run_db(db, move |db| db.delete_project(id))
+                .await
+                .map(|_| Response::Ok)
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::GetPlan { id } => {
+            run_db(db, move |db| db.get_plan(id))
+                .await
+                .map(|plan| Response::PlanDetail { plan })
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::ListPlans { project_id } => {
+            run_db(db, move |db| db.list_plans_by_project(project_id))
+                .await
+                .map(|plans| Response::PlanList { plans })
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::CreatePlan {
+            project_id,
+            name,
+            content,
+        } => {
+            run_db(db, move |db| db.create_plan(project_id, &name, &content))
+                .await
+                .map(|plan| Response::PlanCreated { plan })
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::UpdatePlanStatus { id, status } => {
+            let parsed = match status.parse::<PlanStatus>() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Response::Error {
+                        message: format!("invalid plan status: {status}"),
+                    }
+                }
+            };
+            run_db(db, move |db| db.update_plan_status(id, parsed))
+                .await
+                .map(|_| Response::Ok)
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::UpdateStepStatus {
+            plan_id,
+            step_id,
+            status,
+        } => {
+            let parsed = match status.parse::<StepStatus>() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Response::Error {
+                        message: format!("invalid step status: {status}"),
+                    }
+                }
+            };
+            run_db(db, move |db| db.update_step_status(plan_id, &step_id, parsed))
+                .await
+                .map(|_| Response::Ok)
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
+
+        Request::DeletePlan { id } => {
+            run_db(db, move |db| db.delete_plan(id))
+                .await
+                .map(|_| Response::Ok)
+                .unwrap_or_else(|e| Response::Error { message: e })
+        }
     }
 }
 

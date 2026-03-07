@@ -1,6 +1,9 @@
 use crate::events::Event;
 use crate::hooks::HookEvent;
 use crate::models::Session;
+use crate::plan::{Plan, PlanContent};
+use crate::project::Project;
+use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IpcError {
@@ -28,6 +31,19 @@ pub enum Request {
     GetRecentEvents { limit: usize },
     HookEvent { event: HookEvent },
     Subscribe,
+    ListWorkspaces,
+    CreateWorkspace { path: String, name: Option<String> },
+    DeleteWorkspace { id: i64 },
+    ListProjects { workspace_id: Option<i64> },
+    CreateProject { workspace_id: i64, name: String, description: Option<String> },
+    UpdateProjectStatus { id: i64, status: String },
+    DeleteProject { id: i64 },
+    GetPlan { id: i64 },
+    ListPlans { project_id: i64 },
+    CreatePlan { project_id: i64, name: String, content: PlanContent },
+    UpdatePlanStatus { id: i64, status: String },
+    UpdateStepStatus { plan_id: i64, step_id: String, status: String },
+    DeletePlan { id: i64 },
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -41,6 +57,14 @@ pub enum Response {
     Error { message: String },
     Subscribed,
     SessionUpdate { sessions: Vec<Session> },
+    WorkspaceList { workspaces: Vec<Workspace> },
+    WorkspaceCreated { workspace: Workspace },
+    ProjectList { projects: Vec<Project> },
+    ProjectCreated { project: Project },
+    PlanDetail { plan: Option<Plan> },
+    PlanList { plans: Vec<Plan> },
+    PlanCreated { plan: Plan },
+    Ok,
 }
 
 pub struct IpcClient {
@@ -343,6 +367,89 @@ mod tests {
         let resp = Response::SessionUpdate {
             sessions: Vec::new(),
         };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, parsed);
+    }
+
+    // -- Workspace/Project/Plan Request round-trips --
+
+    #[test]
+    fn test_request_list_workspaces_roundtrip() {
+        let req = Request::ListWorkspaces;
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    #[test]
+    fn test_request_create_workspace_roundtrip() {
+        let req = Request::CreateWorkspace {
+            path: "/home/user/dev".to_string(),
+            name: Some("dev".to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    #[test]
+    fn test_request_create_project_roundtrip() {
+        let req = Request::CreateProject {
+            workspace_id: 1,
+            name: "auth".to_string(),
+            description: Some("Auth feature".to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    #[test]
+    fn test_request_create_plan_roundtrip() {
+        let req = Request::CreatePlan {
+            project_id: 1,
+            name: "Plan A".to_string(),
+            content: PlanContent { phases: vec![] },
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    #[test]
+    fn test_request_update_step_status_roundtrip() {
+        let req = Request::UpdateStepStatus {
+            plan_id: 1,
+            step_id: "0.1".to_string(),
+            status: "completed".to_string(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: Request = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    // -- Workspace/Project/Plan Response round-trips --
+
+    #[test]
+    fn test_response_workspace_list_roundtrip() {
+        let resp = Response::WorkspaceList {
+            workspaces: vec![Workspace {
+                id: 1,
+                name: "dev".to_string(),
+                path: "/home/user/dev".to_string(),
+                created_at: 1706400000,
+                updated_at: 1706500000,
+            }],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(resp, parsed);
+    }
+
+    #[test]
+    fn test_response_ok_roundtrip() {
+        let resp = Response::Ok;
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: Response = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, parsed);

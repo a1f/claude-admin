@@ -6,6 +6,7 @@ pub mod hook_install;
 pub mod hooks;
 pub mod ipc;
 pub mod models;
+pub mod plan;
 pub mod project;
 pub mod state;
 pub mod tmux;

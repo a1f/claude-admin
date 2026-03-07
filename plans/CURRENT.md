@@ -99,7 +99,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        |   list_by_workspace + archive                 |   archived
        |                               |         |                                             |                                               | worktree_path/branch_name nullable
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.3  | Plans table + PlanContent JSON| Pending | C: crates/ca-lib/src/plan.rs                 | cargo test -p ca-lib plan::tests              | PlanContent JSON round-trip fidelity
+ M1.3  | Plans table + PlanContent JSON| Done    | C: crates/ca-lib/src/plan.rs                 | cargo test -p ca-lib plan::tests              | PlanContent JSON round-trip fidelity
        |                               |         | M: crates/ca-lib/src/db.rs (schema)          | >= 15 tests: CRUD + JSON round-trips +        | update_step_status: deserialize->find->
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        |   step status update + missing step error     |   update->serialize->save
        |                               |         |                                             |   + active plan query                         | StepStatus/PlanStatus enums with serde

@@ -102,6 +102,19 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_projects_workspace_id ON projects(workspace_id);
+
+            CREATE TABLE IF NOT EXISTS plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_plans_project_id ON plans(project_id);
             "#,
         )?;
 

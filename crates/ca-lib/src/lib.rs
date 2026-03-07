@@ -8,3 +8,4 @@ pub mod ipc;
 pub mod models;
 pub mod state;
 pub mod tmux;
+pub mod workspace;

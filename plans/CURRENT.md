@@ -90,7 +90,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
 ```
  #     | Step                          | Status  | Creates / Modifies                          | Validation                                    | Review Focus
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.1  | Workspaces table + CRUD       | Pending | C: crates/ca-lib/src/workspace.rs            | cargo test -p ca-lib workspace::tests         | Path uniqueness enforced
+ M1.1  | Workspaces table + CRUD       | Done    | C: crates/ca-lib/src/workspace.rs            | cargo test -p ca-lib workspace::tests         | Path uniqueness enforced
        |                               |         | M: crates/ca-lib/src/db.rs (schema)          | >= 8 tests: create, get, get_by_path,         | Name auto-derived from path dirname
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        |   list, delete, duplicate path error          | Timestamps set correctly
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------

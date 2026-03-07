@@ -10,6 +10,13 @@ pub enum ViewMode {
     Projects,
     Plans,
     PlanDetail,
+    Orchestrator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrchPanel {
+    Steps,
+    Sessions,
 }
 
 pub enum AppAction {
@@ -24,6 +31,11 @@ pub enum AppAction {
         step_id: String,
         new_status: StepStatus,
     },
+    SpawnStep {
+        plan_id: i64,
+        step_id: String,
+    },
+    AttachSession(String),
 }
 
 pub struct App {
@@ -39,6 +51,8 @@ pub struct App {
     pub plan_index: usize,
     pub current_plan: Option<Plan>,
     pub step_index: usize,
+    pub orch_panel: OrchPanel,
+    pub orch_session_index: usize,
 }
 
 impl App {
@@ -56,6 +70,8 @@ impl App {
             plan_index: 0,
             current_plan: None,
             step_index: 0,
+            orch_panel: OrchPanel::Steps,
+            orch_session_index: 0,
         }
     }
 
@@ -140,6 +156,17 @@ impl App {
         self.sessions.get(self.selected_index)
     }
 
+    /// Returns sessions linked to the current plan's project.
+    pub fn project_sessions(&self) -> Vec<&Session> {
+        let Some(plan) = &self.current_plan else {
+            return Vec::new();
+        };
+        self.sessions
+            .iter()
+            .filter(|s| s.project_id == Some(plan.project_id))
+            .collect()
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
@@ -151,6 +178,7 @@ impl App {
                 ViewMode::Projects => self.handle_projects_key(key.code),
                 ViewMode::Plans => self.handle_plans_key(key.code),
                 ViewMode::PlanDetail => self.handle_plan_detail_key(key.code),
+                ViewMode::Orchestrator => self.handle_orchestrator_key(key.code),
             },
         }
     }
@@ -283,12 +311,91 @@ impl App {
                 }
                 AppAction::None
             }
+            KeyCode::Char('o') => {
+                self.view_mode = ViewMode::Orchestrator;
+                self.orch_panel = OrchPanel::Steps;
+                self.orch_session_index = 0;
+                AppAction::None
+            }
             KeyCode::Char('b') => {
                 self.view_mode = ViewMode::Plans;
                 AppAction::None
             }
             _ => AppAction::None,
         }
+    }
+
+    fn handle_orchestrator_key(&mut self, code: KeyCode) -> AppAction {
+        match code {
+            KeyCode::Tab => {
+                self.orch_panel = match self.orch_panel {
+                    OrchPanel::Steps => OrchPanel::Sessions,
+                    OrchPanel::Sessions => OrchPanel::Steps,
+                };
+                AppAction::None
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::PlanDetail;
+                AppAction::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.orch_navigate(1);
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.orch_navigate(-1);
+                AppAction::None
+            }
+            KeyCode::Char('s') => {
+                if let (Some(plan), Some((_, step))) =
+                    (&self.current_plan, self.selected_step())
+                {
+                    AppAction::SpawnStep {
+                        plan_id: plan.id,
+                        step_id: step.id.clone(),
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('a') => {
+                let sessions = self.project_sessions();
+                if let Some(session) = sessions.get(self.orch_session_index) {
+                    AppAction::AttachSession(session.pane_id.clone())
+                } else {
+                    AppAction::None
+                }
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn orch_navigate(&mut self, direction: isize) {
+        match self.orch_panel {
+            OrchPanel::Steps => {
+                let total = self.visible_steps().len();
+                if total > 0 {
+                    self.step_index = wrap_index(self.step_index, total, direction);
+                }
+            }
+            OrchPanel::Sessions => {
+                let total = self.project_sessions().len();
+                if total > 0 {
+                    self.orch_session_index =
+                        wrap_index(self.orch_session_index, total, direction);
+                }
+            }
+        }
+    }
+}
+
+fn wrap_index(current: usize, total: usize, direction: isize) -> usize {
+    if direction > 0 {
+        (current + 1) % total
+    } else if current == 0 {
+        total - 1
+    } else {
+        current - 1
     }
 }
 
@@ -834,6 +941,7 @@ mod tests {
             ViewMode::Projects,
             ViewMode::Plans,
             ViewMode::PlanDetail,
+            ViewMode::Orchestrator,
         ] {
             let mut app = App::new();
             app.view_mode = mode;
@@ -875,5 +983,186 @@ mod tests {
         // Wrap forward
         app.handle_key(key(KeyCode::Char('j')));
         assert_eq!(app.plan_index, 0);
+    }
+
+    // -- Orchestrator tests --
+
+    fn make_session_with_project(id: &str, project_id: Option<i64>, step_id: Option<&str>) -> Session {
+        Session {
+            id: id.to_string(),
+            pane_id: format!("%{id}"),
+            session_name: "main".to_string(),
+            window_index: 0,
+            pane_index: 0,
+            working_dir: "/home/user".to_string(),
+            state: SessionState::Working,
+            detection_method: "process_name".to_string(),
+            last_activity: 0,
+            created_at: 0,
+            updated_at: 0,
+            project_id,
+            plan_step_id: step_id.map(String::from),
+        }
+    }
+
+    #[test]
+    fn test_view_mode_orchestrator_from_plan_detail() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::PlanDetail;
+        app.update_current_plan(make_plan(1, "Test"));
+
+        let action = app.handle_key(key(KeyCode::Char('o')));
+        assert_eq!(app.view_mode, ViewMode::Orchestrator);
+        assert_eq!(app.orch_panel, OrchPanel::Steps);
+        assert_eq!(app.orch_session_index, 0);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_orchestrator_tab_switches_panel() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Orchestrator;
+        assert_eq!(app.orch_panel, OrchPanel::Steps);
+
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.orch_panel, OrchPanel::Sessions);
+
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.orch_panel, OrchPanel::Steps);
+    }
+
+    #[test]
+    fn test_orchestrator_b_returns_to_plan_detail() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Orchestrator;
+
+        let action = app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.view_mode, ViewMode::PlanDetail);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_orchestrator_jk_steps_panel() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Orchestrator;
+        app.orch_panel = OrchPanel::Steps;
+        app.update_current_plan(make_plan(1, "Nav"));
+
+        assert_eq!(app.step_index, 0);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.step_index, 1);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.step_index, 2);
+
+        // Wrap
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.step_index, 0);
+
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.step_index, 2);
+    }
+
+    #[test]
+    fn test_orchestrator_jk_sessions_panel() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Orchestrator;
+        app.orch_panel = OrchPanel::Sessions;
+        // Plan with project_id=1
+        app.update_current_plan(make_plan(1, "Test"));
+        app.update_sessions(vec![
+            make_session_with_project("s1", Some(1), None),
+            make_session_with_project("s2", Some(1), None),
+            make_session_with_project("s3", Some(1), None),
+        ]);
+
+        assert_eq!(app.orch_session_index, 0);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.orch_session_index, 1);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.orch_session_index, 2);
+
+        // Wrap
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.orch_session_index, 0);
+
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.orch_session_index, 2);
+    }
+
+    #[test]
+    fn test_orchestrator_s_returns_spawn_step() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Orchestrator;
+        app.update_current_plan(make_plan(7, "Spawn Test"));
+        app.step_index = 1; // step "1.1"
+
+        let action = app.handle_key(key(KeyCode::Char('s')));
+        match action {
+            AppAction::SpawnStep { plan_id, step_id } => {
+                assert_eq!(plan_id, 7);
+                assert_eq!(step_id, "1.1");
+            }
+            _ => panic!("expected SpawnStep"),
+        }
+    }
+
+    #[test]
+    fn test_orchestrator_a_returns_attach_session() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Orchestrator;
+        app.update_current_plan(make_plan(1, "Attach Test"));
+        app.update_sessions(vec![
+            make_session_with_project("s1", Some(1), Some("0.1")),
+            make_session_with_project("s2", Some(1), Some("1.1")),
+        ]);
+        app.orch_session_index = 1;
+
+        let action = app.handle_key(key(KeyCode::Char('a')));
+        match action {
+            AppAction::AttachSession(pane_id) => assert_eq!(pane_id, "%s2"),
+            _ => panic!("expected AttachSession"),
+        }
+    }
+
+    #[test]
+    fn test_project_sessions_filters_correctly() {
+        let mut app = App::new();
+        app.update_current_plan(make_plan(1, "Filter Test"));
+        app.update_sessions(vec![
+            make_session_with_project("s1", Some(1), Some("0.1")),
+            make_session_with_project("s2", Some(2), None),
+            make_session_with_project("s3", Some(1), Some("1.1")),
+            make_session("s4"), // project_id = None
+        ]);
+
+        let filtered = app.project_sessions();
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].id, "s1");
+        assert_eq!(filtered[1].id, "s3");
+    }
+
+    #[test]
+    fn test_project_sessions_empty_when_no_plan() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session_with_project("s1", Some(1), None),
+        ]);
+
+        let filtered = app.project_sessions();
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn test_orchestrator_quit_works() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Orchestrator;
+
+        let action = app.handle_key(key(KeyCode::Char('q')));
+        assert!(app.should_quit);
+        assert!(matches!(action, AppAction::Quit));
     }
 }

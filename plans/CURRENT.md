@@ -136,7 +136,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         |                                             | Steps marked InProgress in DB                 | suggest_parallelizable_steps: no file
        |                               |         |                                             | ca batch 1 --auto suggests groups             |   overlap = parallelizable
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.10 | TUI orchestration view        | Pending | C: crates/tui/src/project_view.rs            | Open TUI, select project                      | Split view: steps left, sessions right
+ M1.10 | TUI orchestration view        | Done    | C: crates/tui/src/project_view.rs            | Open TUI, select project                      | Split view: steps left, sessions right
        |                               |         | M: crates/tui/src/app.rs (project view mode) | Plan steps + active sessions side by side     | s spawns session for selected step
        |                               |         | M: crates/tui/src/ui.rs (route to view)      | s spawns, a attaches, b batches               | Session-to-step linking visible
        |                               |         |                                             | State changes reflect in both panels          | Tab switches between panels

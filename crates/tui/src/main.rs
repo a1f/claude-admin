@@ -1,5 +1,6 @@
 mod app;
 mod plan_view;
+mod project_view;
 mod ui;
 
 use app::{App, AppAction};
@@ -104,7 +105,16 @@ async fn run_event_loop(
 
 fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
     match action {
-        AppAction::None | AppAction::Quit | AppAction::SelectSession(_) => {}
+        AppAction::None | AppAction::Quit => {}
+        AppAction::SelectSession(session_id) => {
+            if let Some(db) = db {
+                if let Ok(events) = db.get_events(&session_id, 20) {
+                    app.update_preview(events);
+                } else {
+                    app.clear_preview();
+                }
+            }
+        }
         AppAction::LoadProjects => {
             if let Some(db) = db {
                 if let Ok(projects) = db.list_projects() {
@@ -139,5 +149,60 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 }
             }
         }
+        AppAction::SpawnStep { plan_id, step_id } => {
+            if let Some(db) = db {
+                spawn_step_session(db, app, plan_id, &step_id);
+            }
+        }
+        AppAction::AttachSession(pane_id) => {
+            let _ = std::process::Command::new("tmux")
+                .args(["select-window", "-t", &pane_id])
+                .output();
+            let _ = std::process::Command::new("tmux")
+                .args(["select-pane", "-t", &pane_id])
+                .output();
+        }
+    }
+}
+
+fn spawn_step_session(db: &Database, app: &mut App, plan_id: i64, step_id: &str) {
+    let plan = match db.get_plan(plan_id) {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let project = match db.get_project(plan.project_id) {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let workspace = match db.get_workspace(project.workspace_id) {
+        Ok(Some(w)) => w,
+        _ => return,
+    };
+
+    let working_dir = project
+        .worktree_path
+        .as_deref()
+        .unwrap_or(&workspace.path);
+
+    let context = match ca_lib::spawn::generate_plan_context(&plan, step_id) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let context_path = match ca_lib::spawn::write_context_file(&context) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let _ = db.update_step_status(plan_id, step_id, ca_lib::plan::StepStatus::InProgress);
+
+    let opts = ca_lib::spawn::SpawnOptions {
+        working_dir: working_dir.to_string(),
+        context_file: Some(context_path.to_string_lossy().to_string()),
+        window_name: Some(format!("step-{step_id}")),
+    };
+    let _ = ca_lib::spawn::spawn_tmux_session(&opts);
+
+    if let Ok(Some(updated)) = db.get_plan(plan_id) {
+        app.update_current_plan(updated);
     }
 }

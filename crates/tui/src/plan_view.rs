@@ -223,7 +223,7 @@ fn draw_step_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(detail, area);
 }
 
-fn step_indicator(status: &StepStatus) -> &'static str {
+pub(crate) fn step_indicator(status: &StepStatus) -> &'static str {
     match status {
         StepStatus::Pending => "o ",
         StepStatus::InProgress => "* ",
@@ -233,7 +233,7 @@ fn step_indicator(status: &StepStatus) -> &'static str {
     }
 }
 
-fn step_color(status: &StepStatus) -> Color {
+pub(crate) fn step_color(status: &StepStatus) -> Color {
     match status {
         StepStatus::Pending => Color::White,
         StepStatus::InProgress => Color::Yellow,

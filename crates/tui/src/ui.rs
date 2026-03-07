@@ -1,5 +1,6 @@
 use crate::app::{App, ViewMode};
 use crate::plan_view;
+use crate::project_view;
 use ca_lib::events::EventType;
 use ca_lib::models::SessionState;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -14,6 +15,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ViewMode::Projects => plan_view::draw_projects(frame, app),
         ViewMode::Plans => plan_view::draw_plans(frame, app),
         ViewMode::PlanDetail => plan_view::draw_plan_detail(frame, app),
+        ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app),
     }
 }
 

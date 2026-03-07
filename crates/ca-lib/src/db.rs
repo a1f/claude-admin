@@ -29,6 +29,7 @@ impl Database {
 
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
 
         let version: String = conn.query_row("SELECT sqlite_version()", [], |row| row.get(0))?;
 
@@ -87,6 +88,20 @@ impl Database {
                 updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                worktree_path TEXT,
+                branch_name TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_projects_workspace_id ON projects(workspace_id);
             "#,
         )?;
 

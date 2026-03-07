@@ -94,7 +94,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/ca-lib/src/db.rs (schema)          | >= 8 tests: create, get, get_by_path,         | Name auto-derived from path dirname
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        |   list, delete, duplicate path error          | Timestamps set correctly
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.2  | Projects table + CRUD         | Pending | C: crates/ca-lib/src/project.rs              | cargo test -p ca-lib project::tests           | FK to workspaces with CASCADE delete
+ M1.2  | Projects table + CRUD         | Done    | C: crates/ca-lib/src/project.rs              | cargo test -p ca-lib project::tests           | FK to workspaces with CASCADE delete
        |                               |         | M: crates/ca-lib/src/db.rs (schema)          | >= 10 tests: CRUD + cascade delete +          | Status enum: active,running,completed,
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        |   list_by_workspace + archive                 |   archived
        |                               |         |                                             |                                               | worktree_path/branch_name nullable

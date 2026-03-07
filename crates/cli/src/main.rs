@@ -87,6 +87,14 @@ pub enum Command {
         #[command(subcommand)]
         command: PlanCommand,
     },
+    /// Spawn a Claude session for a plan step
+    Spawn {
+        /// Plan ID
+        plan_id: i64,
+        /// Step ID (e.g., "0.1", "1.2")
+        #[arg(long)]
+        step: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -191,6 +199,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Workspace { command } => handle_workspace(command),
         Command::Project { command } => handle_project(command),
         Command::Plan { command } => handle_plan(command),
+        Command::Spawn { plan_id, step } => handle_spawn(plan_id, &step),
     }
 }
 
@@ -511,6 +520,54 @@ fn handle_plan(command: PlanCommand) -> Result<(), CliError> {
             Ok(())
         }
     }
+}
+
+fn handle_spawn(plan_id: i64, step_id: &str) -> Result<(), CliError> {
+    let map_spawn_err = |e: ca_lib::spawn::SpawnError| CliError::DaemonError(e.to_string());
+    let db = open_db()?;
+
+    let plan = db
+        .get_plan(plan_id)?
+        .ok_or_else(|| CliError::NotFound(format!("plan {plan_id}")))?;
+
+    let project = db
+        .get_project(plan.project_id)?
+        .ok_or_else(|| CliError::NotFound(format!("project {}", plan.project_id)))?;
+
+    let workspace = db
+        .get_workspace(project.workspace_id)?
+        .ok_or_else(|| CliError::NotFound(format!("workspace {}", project.workspace_id)))?;
+
+    let working_dir = project
+        .worktree_path
+        .as_deref()
+        .unwrap_or(&workspace.path);
+
+    let context = ca_lib::spawn::generate_plan_context(&plan, step_id)
+        .map_err(|e| CliError::InvalidInput(e.to_string()))?;
+
+    let context_path =
+        ca_lib::spawn::write_context_file(&context).map_err(&map_spawn_err)?;
+
+    db.update_step_status(plan_id, step_id, StepStatus::InProgress)?;
+
+    let window_name = format!("step-{step_id}");
+    let opts = ca_lib::spawn::SpawnOptions {
+        working_dir: working_dir.to_string(),
+        context_file: Some(context_path.to_string_lossy().to_string()),
+        window_name: Some(window_name),
+    };
+
+    let pane_id =
+        ca_lib::spawn::spawn_tmux_session(&opts).map_err(map_spawn_err)?;
+
+    println!("Spawned Claude session for step {step_id}");
+    println!("  Plan: {} (id={})", plan.name, plan.id);
+    println!("  Dir:  {working_dir}");
+    println!("  Pane: {pane_id}");
+    println!("  Context: {}", context_path.display());
+
+    Ok(())
 }
 
 fn daemon_start() -> Result<(), CliError> {
@@ -1181,6 +1238,32 @@ mod tests {
                 _ => panic!("expected Show"),
             },
             _ => panic!("expected Plan command"),
+        }
+    }
+
+    // -- Group 6b: Spawn CLI parsing --
+
+    #[test]
+    fn test_clap_spawn_parses() {
+        let cli = Cli::parse_from(["claude-admin", "spawn", "1", "--step", "0.1"]);
+        match cli.command {
+            Command::Spawn { plan_id, step } => {
+                assert_eq!(plan_id, 1);
+                assert_eq!(step, "0.1");
+            }
+            _ => panic!("expected Spawn command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_spawn_dotted_step_id() {
+        let cli = Cli::parse_from(["claude-admin", "spawn", "42", "--step", "2.3"]);
+        match cli.command {
+            Command::Spawn { plan_id, step } => {
+                assert_eq!(plan_id, 42);
+                assert_eq!(step, "2.3");
+            }
+            _ => panic!("expected Spawn command"),
         }
     }
 

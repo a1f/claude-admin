@@ -11,6 +11,7 @@ pub mod models;
 pub mod plan;
 pub mod project;
 pub mod settings;
+pub mod spawn;
 pub mod state;
 pub mod tmux;
 pub mod workspace;

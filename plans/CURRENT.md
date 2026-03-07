@@ -125,7 +125,7 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
        |                               |         | M: crates/tui/src/ui.rs (route views)        | s key cycles status, persists to DB           | Progress counter per phase
        |                               |         |                                             | b key returns to session list                 | b/Enter navigation between views
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M1.8  | Session spawn with plan       | Pending | C: crates/ca-lib/src/spawn.rs                | ca spawn 1 --step 0.1                         | generate_plan_context output format:
+ M1.8  | Session spawn with plan       | Done    | C: crates/ca-lib/src/spawn.rs                | ca spawn 1 --step 0.1                         | generate_plan_context output format:
        | context injection             |         | M: crates/cli/src/main.rs (spawn subcommand) | New tmux window opens with Claude             |   goal, progress, current step,
        |                               |         |                                             | Claude receives plan context as prompt         |   completed/remaining, exit criteria
        |                               |         |                                             | Session registered with project_id +           | tmux new-window + send-keys

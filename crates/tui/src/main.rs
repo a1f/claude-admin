@@ -9,7 +9,7 @@ use ca_lib::ipc::{IpcClient, Request, Response};
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
 use std::io;
@@ -179,10 +179,7 @@ fn spawn_step_session(db: &Database, app: &mut App, plan_id: i64, step_id: &str)
         _ => return,
     };
 
-    let working_dir = project
-        .worktree_path
-        .as_deref()
-        .unwrap_or(&workspace.path);
+    let working_dir = project.worktree_path.as_deref().unwrap_or(&workspace.path);
 
     let context = match ca_lib::spawn::generate_plan_context(&plan, step_id) {
         Ok(c) => c,

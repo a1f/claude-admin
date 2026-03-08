@@ -3,11 +3,11 @@ use crate::plan_view;
 use crate::project_view;
 use ca_lib::events::EventType;
 use ca_lib::models::SessionState;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
-use ratatui::Frame;
 
 pub fn draw(frame: &mut Frame, app: &App) {
     match app.view_mode {
@@ -28,8 +28,11 @@ fn draw_sessions(frame: &mut Frame, app: &App) {
         } else {
             "Not connected to daemon. Is it running? (claude-admin daemon start)"
         };
-        let block = Paragraph::new(msg)
-            .block(Block::default().title(" claude-admin ").borders(Borders::ALL));
+        let block = Paragraph::new(msg).block(
+            Block::default()
+                .title(" claude-admin ")
+                .borders(Borders::ALL),
+        );
         frame.render_widget(block, area);
         return;
     }
@@ -63,7 +66,11 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().title(" Sessions (p: plans) ").borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(" Sessions (p: plans) ")
+                .borders(Borders::ALL),
+        )
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 
@@ -90,10 +97,7 @@ fn build_preview_lines<'a>(app: &'a App, session: &'a ca_lib::models::Session) -
     let bold = Style::default().add_modifier(Modifier::BOLD);
 
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled("ID: ", bold),
-            Span::raw(&session.id),
-        ]),
+        Line::from(vec![Span::styled("ID: ", bold), Span::raw(&session.id)]),
         Line::from(vec![
             Span::styled("State: ", bold),
             Span::styled(

@@ -164,7 +164,11 @@ pub enum PlanCommand {
     /// Update plan status
     Status { id: i64, status: String },
     /// Update a plan step status
-    Step { id: i64, step_id: String, status: String },
+    Step {
+        id: i64,
+        step_id: String,
+        status: String,
+    },
     /// Show plan details
     Show { id: i64 },
     /// Delete a plan
@@ -292,10 +296,7 @@ async fn handle_list(socket: &Option<PathBuf>) -> Result<(), CliError> {
     }
 }
 
-async fn handle_status(
-    socket: &Option<PathBuf>,
-    session_id: &str,
-) -> Result<(), CliError> {
+async fn handle_status(socket: &Option<PathBuf>, session_id: &str) -> Result<(), CliError> {
     let mut client = connect_to_daemon(socket).await?;
     let request = Request::GetSession {
         id: session_id.to_string(),
@@ -354,7 +355,8 @@ fn handle_hooks(command: HooksCommand) -> Result<(), CliError> {
         HooksCommand::Install => {
             let script = ca_lib::hook_install::hook_script_path().map_err(map_err)?;
             let settings = ca_lib::hook_install::settings_path().map_err(map_err)?;
-            let result = ca_lib::hook_install::install_hooks(&script, &settings).map_err(map_err)?;
+            let result =
+                ca_lib::hook_install::install_hooks(&script, &settings).map_err(map_err)?;
 
             if result.already_installed {
                 println!("Hooks are already installed.");
@@ -453,9 +455,11 @@ fn handle_project(command: ProjectCommand) -> Result<(), CliError> {
             Ok(())
         }
         ProjectCommand::Status { id, status } => {
-            let parsed: ProjectStatus = status
-                .parse()
-                .map_err(|_| CliError::InvalidInput(format!("invalid status: {status}. Use: active, running, completed, archived")))?;
+            let parsed: ProjectStatus = status.parse().map_err(|_| {
+                CliError::InvalidInput(format!(
+                    "invalid status: {status}. Use: active, running, completed, archived"
+                ))
+            })?;
             db.update_project_status(id, parsed)?;
             println!("Updated project {id} status to {parsed}.");
             Ok(())
@@ -505,9 +509,11 @@ fn handle_plan(command: PlanCommand) -> Result<(), CliError> {
             Ok(())
         }
         PlanCommand::Status { id, status } => {
-            let parsed: PlanStatus = status
-                .parse()
-                .map_err(|_| CliError::InvalidInput(format!("invalid status: {status}. Use: draft, active, completed, abandoned")))?;
+            let parsed: PlanStatus = status.parse().map_err(|_| {
+                CliError::InvalidInput(format!(
+                    "invalid status: {status}. Use: draft, active, completed, abandoned"
+                ))
+            })?;
             db.update_plan_status(id, parsed)?;
             println!("Updated plan {id} status to {parsed}.");
             Ok(())
@@ -558,16 +564,12 @@ fn handle_spawn(plan_id: i64, step_id: &str) -> Result<(), CliError> {
         .get_workspace(project.workspace_id)?
         .ok_or_else(|| CliError::NotFound(format!("workspace {}", project.workspace_id)))?;
 
-    let working_dir = project
-        .worktree_path
-        .as_deref()
-        .unwrap_or(&workspace.path);
+    let working_dir = project.worktree_path.as_deref().unwrap_or(&workspace.path);
 
     let context = ca_lib::spawn::generate_plan_context(&plan, step_id)
         .map_err(|e| CliError::InvalidInput(e.to_string()))?;
 
-    let context_path =
-        ca_lib::spawn::write_context_file(&context).map_err(&map_spawn_err)?;
+    let context_path = ca_lib::spawn::write_context_file(&context).map_err(&map_spawn_err)?;
 
     db.update_step_status(plan_id, step_id, StepStatus::InProgress)?;
 
@@ -578,8 +580,7 @@ fn handle_spawn(plan_id: i64, step_id: &str) -> Result<(), CliError> {
         window_name: Some(window_name),
     };
 
-    let pane_id =
-        ca_lib::spawn::spawn_tmux_session(&opts).map_err(map_spawn_err)?;
+    let pane_id = ca_lib::spawn::spawn_tmux_session(&opts).map_err(map_spawn_err)?;
 
     println!("Spawned Claude session for step {step_id}");
     println!("  Plan: {} (id={})", plan.name, plan.id);
@@ -590,12 +591,7 @@ fn handle_spawn(plan_id: i64, step_id: &str) -> Result<(), CliError> {
     Ok(())
 }
 
-fn handle_batch(
-    plan_id: i64,
-    steps: Option<&str>,
-    max: usize,
-    auto: bool,
-) -> Result<(), CliError> {
+fn handle_batch(plan_id: i64, steps: Option<&str>, max: usize, auto: bool) -> Result<(), CliError> {
     let db = open_db()?;
 
     let plan = db
@@ -610,10 +606,7 @@ fn handle_batch(
         .get_workspace(project.workspace_id)?
         .ok_or_else(|| CliError::NotFound(format!("workspace {}", project.workspace_id)))?;
 
-    let working_dir = project
-        .worktree_path
-        .as_deref()
-        .unwrap_or(&workspace.path);
+    let working_dir = project.worktree_path.as_deref().unwrap_or(&workspace.path);
 
     if auto {
         let groups = ca_lib::orchestrator::suggest_parallelizable_steps(&plan);
@@ -627,16 +620,11 @@ fn handle_batch(
         return Ok(());
     }
 
-    let step_ids: Option<Vec<String>> = steps.map(|s| {
-        s.split(',').map(|id| id.trim().to_string()).collect()
-    });
+    let step_ids: Option<Vec<String>> =
+        steps.map(|s| s.split(',').map(|id| id.trim().to_string()).collect());
 
-    let batch_steps = ca_lib::orchestrator::select_batch_steps(
-        &plan,
-        step_ids.as_deref(),
-        max,
-    )
-    .map_err(|e| CliError::InvalidInput(e.to_string()))?;
+    let batch_steps = ca_lib::orchestrator::select_batch_steps(&plan, step_ids.as_deref(), max)
+        .map_err(|e| CliError::InvalidInput(e.to_string()))?;
 
     println!(
         "Spawning {} session(s) for plan \"{}\"...",
@@ -764,9 +752,10 @@ fn daemon_stop() -> Result<(), CliError> {
         CliError::DaemonError("no PID file found; daemon may not be running".to_string())
     })?;
 
-    let pid: i32 = contents.trim().parse().map_err(|_| {
-        CliError::DaemonError("invalid PID file contents".to_string())
-    })?;
+    let pid: i32 = contents
+        .trim()
+        .parse()
+        .map_err(|_| CliError::DaemonError("invalid PID file contents".to_string()))?;
 
     #[cfg(unix)]
     {
@@ -1330,14 +1319,7 @@ mod tests {
 
     #[test]
     fn test_clap_plan_step_parses() {
-        let cli = Cli::parse_from([
-            "claude-admin",
-            "plan",
-            "step",
-            "1",
-            "0.1",
-            "completed",
-        ]);
+        let cli = Cli::parse_from(["claude-admin", "plan", "step", "1", "0.1", "completed"]);
         match cli.command {
             Command::Plan { command } => match command {
                 PlanCommand::Step {

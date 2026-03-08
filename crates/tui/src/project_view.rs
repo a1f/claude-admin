@@ -2,11 +2,11 @@ use crate::app::{App, OrchPanel};
 use crate::plan_view;
 use ca_lib::models::SessionState;
 use ca_lib::plan::StepStatus;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
-use ratatui::Frame;
 
 pub fn draw_orchestrator(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -82,9 +82,7 @@ fn draw_orch_steps(frame: &mut Frame, app: &App, area: Rect) {
             ]);
             items.push(ListItem::new(content));
 
-            let flat_idx = visible
-                .iter()
-                .position(|&(vp, vs)| vp == pi && vs == si);
+            let flat_idx = visible.iter().position(|&(vp, vs)| vp == pi && vs == si);
             list_index_for_step.push(flat_idx);
         }
     }
@@ -132,10 +130,7 @@ fn draw_orch_sessions(frame: &mut Frame, app: &App, area: Rect) {
         .map(|s| {
             let indicator = session_state_indicator(&s.state);
             let color = session_state_color(&s.state);
-            let step_label = s
-                .plan_step_id
-                .as_deref()
-                .unwrap_or("-");
+            let step_label = s.plan_step_id.as_deref().unwrap_or("-");
 
             let content = Line::from(vec![
                 Span::styled(indicator, Style::default().fg(color)),

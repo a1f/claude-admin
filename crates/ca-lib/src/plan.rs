@@ -1,6 +1,6 @@
 use crate::db::{Database, DbError};
-use rusqlite::params;
 use rusqlite::OptionalExtension;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -221,7 +221,7 @@ impl Database {
                 FROM plans WHERE id = ?1
                 "#,
                 params![id],
-                |row| row_to_plan(row),
+                row_to_plan,
             )
             .optional()?;
 
@@ -244,7 +244,7 @@ impl Database {
                 LIMIT 1
                 "#,
                 params![project_id, PlanStatus::Active.as_str()],
-                |row| row_to_plan(row),
+                row_to_plan,
             )
             .optional()?;
 
@@ -265,7 +265,7 @@ impl Database {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![project_id], |row| row_to_plan(row))?;
+        let rows = stmt.query_map(params![project_id], row_to_plan)?;
 
         let mut plans = Vec::new();
         for row_result in rows {
@@ -350,9 +350,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use crate::db::Database;
-    use crate::plan::{
-        ExitCriteria, Phase, PlanContent, PlanStatus, Step, StepStatus,
-    };
+    use crate::plan::{ExitCriteria, Phase, PlanContent, PlanStatus, Step, StepStatus};
     use tempfile::tempdir;
 
     fn create_test_db() -> (Database, tempfile::TempDir) {
@@ -370,9 +368,7 @@ mod tests {
     }
 
     fn create_test_project(db: &Database, ws_id: i64) -> i64 {
-        let project = db
-            .create_project(ws_id, "Test Project", None)
-            .unwrap();
+        let project = db.create_project(ws_id, "Test Project", None).unwrap();
         project.id
     }
 
@@ -498,7 +494,8 @@ mod tests {
 
         let _draft = db.create_plan(proj_id, "Draft Plan", &content).unwrap();
         let active = db.create_plan(proj_id, "Active Plan", &content).unwrap();
-        db.update_plan_status(active.id, PlanStatus::Active).unwrap();
+        db.update_plan_status(active.id, PlanStatus::Active)
+            .unwrap();
 
         let fetched = db.get_active_plan(proj_id).unwrap().unwrap();
         assert_eq!(fetched.id, active.id);
@@ -575,7 +572,8 @@ mod tests {
 
         let plan = db.create_plan(proj_id, "Step Plan", &content).unwrap();
 
-        db.update_step_status(plan.id, "1.1", StepStatus::InProgress).unwrap();
+        db.update_step_status(plan.id, "1.1", StepStatus::InProgress)
+            .unwrap();
 
         let fetched = db.get_plan(plan.id).unwrap().unwrap();
         let step = fetched
@@ -588,8 +586,14 @@ mod tests {
         assert_eq!(step.status, StepStatus::InProgress);
 
         // Other steps remain unchanged
-        assert_eq!(fetched.content.phases[0].steps[0].status, StepStatus::Pending);
-        assert_eq!(fetched.content.phases[1].steps[1].status, StepStatus::Pending);
+        assert_eq!(
+            fetched.content.phases[0].steps[0].status,
+            StepStatus::Pending
+        );
+        assert_eq!(
+            fetched.content.phases[1].steps[1].status,
+            StepStatus::Pending
+        );
     }
 
     #[test]
@@ -629,7 +633,8 @@ mod tests {
         let plan = db.create_plan(proj_id, "Timed Plan", &content).unwrap();
         let original_updated_at = plan.updated_at;
 
-        db.update_step_status(plan.id, "0.1", StepStatus::Completed).unwrap();
+        db.update_step_status(plan.id, "0.1", StepStatus::Completed)
+            .unwrap();
 
         let fetched = db.get_plan(plan.id).unwrap().unwrap();
         assert!(fetched.updated_at >= original_updated_at);
@@ -733,7 +738,10 @@ mod tests {
     #[test]
     fn test_step_status_from_str() {
         assert_eq!("pending".parse::<StepStatus>(), Ok(StepStatus::Pending));
-        assert_eq!("in_progress".parse::<StepStatus>(), Ok(StepStatus::InProgress));
+        assert_eq!(
+            "in_progress".parse::<StepStatus>(),
+            Ok(StepStatus::InProgress)
+        );
         assert_eq!("completed".parse::<StepStatus>(), Ok(StepStatus::Completed));
         assert_eq!("blocked".parse::<StepStatus>(), Ok(StepStatus::Blocked));
         assert_eq!("skipped".parse::<StepStatus>(), Ok(StepStatus::Skipped));

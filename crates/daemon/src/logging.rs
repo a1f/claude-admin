@@ -5,7 +5,7 @@ use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter, Layer};
+use tracing_subscriber::{EnvFilter, Layer, fmt};
 
 #[derive(Error, Debug)]
 pub enum LoggingError {
@@ -102,6 +102,7 @@ mod tests {
     #[test]
     fn test_log_level_filtering() {
         let filter = EnvFilter::from_default_env().add_directive(Level::DEBUG.into());
-        assert!(format!("{:?}", filter).contains("DEBUG") || format!("{:?}", filter).len() > 0);
+        let rendered = format!("{:?}", filter);
+        assert!(rendered.contains("DEBUG") || !rendered.is_empty());
     }
 }

@@ -76,7 +76,8 @@ pub fn is_tmux_running() -> bool {
         .unwrap_or(false)
 }
 
-const PANE_FORMAT: &str = "#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_id}\t#{pane_current_path}";
+const PANE_FORMAT: &str =
+    "#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_id}\t#{pane_current_path}";
 
 pub fn list_all_panes() -> Result<Vec<TmuxPane>, TmuxError> {
     let output = Command::new("tmux")

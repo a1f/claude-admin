@@ -91,10 +91,7 @@ fn select_explicit_steps(
     Ok(step_ids.iter().take(max_concurrent).cloned().collect())
 }
 
-fn select_auto_steps(
-    plan: &Plan,
-    max_concurrent: usize,
-) -> Result<Vec<String>, OrchestratorError> {
+fn select_auto_steps(plan: &Plan, max_concurrent: usize) -> Result<Vec<String>, OrchestratorError> {
     let groups = suggest_parallelizable_steps(plan);
     let first_group = groups.first().ok_or(OrchestratorError::NoPendingSteps)?;
     Ok(first_group.iter().take(max_concurrent).cloned().collect())
@@ -237,11 +234,7 @@ mod tests {
     fn test_select_batch_steps_max_respected() {
         let plan = sample_plan();
         // Phase 1 has 3 pending steps; request with --steps and max=2
-        let ids = vec![
-            "1.1".to_string(),
-            "1.2".to_string(),
-            "1.3".to_string(),
-        ];
+        let ids = vec!["1.1".to_string(), "1.2".to_string(), "1.3".to_string()];
         let result = select_batch_steps(&plan, Some(&ids), 2).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result, vec!["1.1", "1.2"]);

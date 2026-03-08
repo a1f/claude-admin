@@ -16,11 +16,8 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_args(args)?;
     config.ensure_data_dir()?;
 
-    let _logging_guard = logging::init_logging(
-        config.log_level,
-        &config.log_file,
-        &config.json_log_file,
-    )?;
+    let _logging_guard =
+        logging::init_logging(config.log_level, &config.log_file, &config.json_log_file)?;
 
     tracing::info!(pid = std::process::id(), "Daemon starting");
 

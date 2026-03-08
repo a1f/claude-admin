@@ -89,7 +89,10 @@ mod tests {
 
     #[test]
     fn test_event_type_type_name() {
-        assert_eq!(EventType::SessionDiscovered.type_name(), "session_discovered");
+        assert_eq!(
+            EventType::SessionDiscovered.type_name(),
+            "session_discovered"
+        );
         assert_eq!(EventType::SessionRemoved.type_name(), "session_removed");
         assert_eq!(
             EventType::StateChanged {

@@ -24,7 +24,10 @@ impl PidFile {
                 if is_process_running(existing_pid) {
                     return Err(PidError::AlreadyRunning(existing_pid));
                 }
-                tracing::warn!(pid = existing_pid, "Removing stale PID file (process not running)");
+                tracing::warn!(
+                    pid = existing_pid,
+                    "Removing stale PID file (process not running)"
+                );
                 let _ = fs::remove_file(path);
             }
         }
@@ -36,7 +39,9 @@ impl PidFile {
 
         tracing::info!(pid = pid, path = %path.display(), "PID file created");
 
-        Ok(PidFile { path: path.to_owned() })
+        Ok(PidFile {
+            path: path.to_owned(),
+        })
     }
 
     pub fn remove(&self) -> Result<(), std::io::Error> {

@@ -1,6 +1,6 @@
 use crate::events::{Event, EventType};
 use crate::models::{Session, SessionState};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -334,7 +334,7 @@ impl Database {
         payload: Option<&serde_json::Value>,
     ) -> Result<i64, DbError> {
         let event_type_json = serde_json::to_string(event_type)?;
-        let payload_json = payload.map(|p| serde_json::to_string(p)).transpose()?;
+        let payload_json = payload.map(serde_json::to_string).transpose()?;
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

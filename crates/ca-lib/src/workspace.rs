@@ -1,6 +1,6 @@
 use crate::db::{Database, DbError};
-use rusqlite::params;
 use rusqlite::OptionalExtension;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -24,11 +24,7 @@ fn row_to_workspace(row: &rusqlite::Row) -> rusqlite::Result<Workspace> {
 }
 
 impl Database {
-    pub fn create_workspace(
-        &self,
-        path: &str,
-        name: Option<&str>,
-    ) -> Result<Workspace, DbError> {
+    pub fn create_workspace(&self, path: &str, name: Option<&str>) -> Result<Workspace, DbError> {
         let resolved_name = match name {
             Some(n) => n.to_string(),
             None => Path::new(path)
@@ -70,7 +66,7 @@ impl Database {
                 FROM workspaces WHERE id = ?1
                 "#,
                 params![id],
-                |row| row_to_workspace(row),
+                row_to_workspace,
             )
             .optional()?;
 
@@ -86,7 +82,7 @@ impl Database {
                 FROM workspaces WHERE path = ?1
                 "#,
                 params![path],
-                |row| row_to_workspace(row),
+                row_to_workspace,
             )
             .optional()?;
 
@@ -102,7 +98,7 @@ impl Database {
             "#,
         )?;
 
-        let rows = stmt.query_map([], |row| row_to_workspace(row))?;
+        let rows = stmt.query_map([], row_to_workspace)?;
 
         let mut workspaces = Vec::new();
         for row_result in rows {
@@ -289,9 +285,7 @@ mod tests {
             .unwrap()
             .as_secs() as i64;
 
-        let ws = db
-            .create_workspace("/home/user/project", None)
-            .unwrap();
+        let ws = db.create_workspace("/home/user/project", None).unwrap();
 
         let after = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

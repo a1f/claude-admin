@@ -49,7 +49,9 @@ impl Config {
 
         let log_file = args.log_file.unwrap_or_else(|| data_dir.join("daemon.log"));
         let json_log_file = log_file.with_extension("json.log");
-        let socket_path = args.socket_path.unwrap_or_else(|| data_dir.join("daemon.sock"));
+        let socket_path = args
+            .socket_path
+            .unwrap_or_else(|| data_dir.join("daemon.sock"));
         let pid_file = args.pid_file.unwrap_or_else(|| data_dir.join("daemon.pid"));
         let db_path = args.db_path.unwrap_or_else(|| data_dir.join("sessions.db"));
 
@@ -89,9 +91,9 @@ fn parse_log_level(s: &str) -> Result<tracing::Level, ConfigError> {
 
 #[allow(dead_code)]
 pub fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with("~/") {
+    if let Some(stripped) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
-            return home.join(&path[2..]);
+            return home.join(stripped);
         }
     }
     PathBuf::from(path)

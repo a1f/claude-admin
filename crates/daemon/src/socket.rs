@@ -209,12 +209,10 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
             .map(|sessions| Response::SessionList { sessions })
             .unwrap_or_else(|e| Response::Error { message: e }),
 
-        Request::GetSession { id } => {
-            run_db(db, move |db| db.get_session(&id))
-                .await
-                .map(|session| Response::Session { session })
-                .unwrap_or_else(|e| Response::Error { message: e })
-        }
+        Request::GetSession { id } => run_db(db, move |db| db.get_session(&id))
+            .await
+            .map(|session| Response::Session { session })
+            .unwrap_or_else(|e| Response::Error { message: e }),
 
         Request::GetSessionByPane { pane_id } => {
             run_db(db, move |db| db.get_session_by_pane(&pane_id))
@@ -230,23 +228,19 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
                 .unwrap_or_else(|e| Response::Error { message: e })
         }
 
-        Request::GetRecentEvents { limit } => {
-            run_db(db, move |db| db.get_recent_events(limit))
-                .await
-                .map(|events| Response::Events { events })
-                .unwrap_or_else(|e| Response::Error { message: e })
-        }
-
-        Request::HookEvent { event } => {
-            run_db(db, move |db| {
-                apply_hook_event(db, &event).map_err(|e| match e {
-                    ca_lib::hooks::HookError::Db(db_err) => db_err,
-                })
-            })
+        Request::GetRecentEvents { limit } => run_db(db, move |db| db.get_recent_events(limit))
             .await
-            .map(|session_id| Response::HookAck { session_id })
-            .unwrap_or_else(|e| Response::Error { message: e })
-        }
+            .map(|events| Response::Events { events })
+            .unwrap_or_else(|e| Response::Error { message: e }),
+
+        Request::HookEvent { event } => run_db(db, move |db| {
+            apply_hook_event(db, &event).map_err(|e| match e {
+                ca_lib::hooks::HookError::Db(db_err) => db_err,
+            })
+        })
+        .await
+        .map(|session_id| Response::HookAck { session_id })
+        .unwrap_or_else(|e| Response::Error { message: e }),
 
         // Handled before dispatch in handle_connection; included for exhaustiveness
         Request::Subscribe => Response::Subscribed,
@@ -263,35 +257,29 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
                 .unwrap_or_else(|e| Response::Error { message: e })
         }
 
-        Request::DeleteWorkspace { id } => {
-            run_db(db, move |db| db.delete_workspace(id))
-                .await
-                .map(|_| Response::Ok)
-                .unwrap_or_else(|e| Response::Error { message: e })
-        }
-
-        Request::ListProjects { workspace_id } => {
-            run_db(db, move |db| match workspace_id {
-                Some(ws_id) => db.list_projects_by_workspace(ws_id),
-                None => db.list_projects(),
-            })
+        Request::DeleteWorkspace { id } => run_db(db, move |db| db.delete_workspace(id))
             .await
-            .map(|projects| Response::ProjectList { projects })
-            .unwrap_or_else(|e| Response::Error { message: e })
-        }
+            .map(|_| Response::Ok)
+            .unwrap_or_else(|e| Response::Error { message: e }),
+
+        Request::ListProjects { workspace_id } => run_db(db, move |db| match workspace_id {
+            Some(ws_id) => db.list_projects_by_workspace(ws_id),
+            None => db.list_projects(),
+        })
+        .await
+        .map(|projects| Response::ProjectList { projects })
+        .unwrap_or_else(|e| Response::Error { message: e }),
 
         Request::CreateProject {
             workspace_id,
             name,
             description,
-        } => {
-            run_db(db, move |db| {
-                db.create_project(workspace_id, &name, description.as_deref())
-            })
-            .await
-            .map(|project| Response::ProjectCreated { project })
-            .unwrap_or_else(|e| Response::Error { message: e })
-        }
+        } => run_db(db, move |db| {
+            db.create_project(workspace_id, &name, description.as_deref())
+        })
+        .await
+        .map(|project| Response::ProjectCreated { project })
+        .unwrap_or_else(|e| Response::Error { message: e }),
 
         Request::UpdateProjectStatus { id, status } => {
             let parsed = match status.parse::<ProjectStatus>() {
@@ -299,7 +287,7 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
                 Err(_) => {
                     return Response::Error {
                         message: format!("invalid project status: {status}"),
-                    }
+                    };
                 }
             };
             run_db(db, move |db| db.update_project_status(id, parsed))
@@ -308,19 +296,15 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
                 .unwrap_or_else(|e| Response::Error { message: e })
         }
 
-        Request::DeleteProject { id } => {
-            run_db(db, move |db| db.delete_project(id))
-                .await
-                .map(|_| Response::Ok)
-                .unwrap_or_else(|e| Response::Error { message: e })
-        }
+        Request::DeleteProject { id } => run_db(db, move |db| db.delete_project(id))
+            .await
+            .map(|_| Response::Ok)
+            .unwrap_or_else(|e| Response::Error { message: e }),
 
-        Request::GetPlan { id } => {
-            run_db(db, move |db| db.get_plan(id))
-                .await
-                .map(|plan| Response::PlanDetail { plan })
-                .unwrap_or_else(|e| Response::Error { message: e })
-        }
+        Request::GetPlan { id } => run_db(db, move |db| db.get_plan(id))
+            .await
+            .map(|plan| Response::PlanDetail { plan })
+            .unwrap_or_else(|e| Response::Error { message: e }),
 
         Request::ListPlans { project_id } => {
             run_db(db, move |db| db.list_plans_by_project(project_id))
@@ -333,12 +317,10 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
             project_id,
             name,
             content,
-        } => {
-            run_db(db, move |db| db.create_plan(project_id, &name, &content))
-                .await
-                .map(|plan| Response::PlanCreated { plan })
-                .unwrap_or_else(|e| Response::Error { message: e })
-        }
+        } => run_db(db, move |db| db.create_plan(project_id, &name, &content))
+            .await
+            .map(|plan| Response::PlanCreated { plan })
+            .unwrap_or_else(|e| Response::Error { message: e }),
 
         Request::UpdatePlanStatus { id, status } => {
             let parsed = match status.parse::<PlanStatus>() {
@@ -346,7 +328,7 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
                 Err(_) => {
                     return Response::Error {
                         message: format!("invalid plan status: {status}"),
-                    }
+                    };
                 }
             };
             run_db(db, move |db| db.update_plan_status(id, parsed))
@@ -365,21 +347,21 @@ async fn dispatch_request(request: Request, db: Arc<Mutex<Database>>) -> Respons
                 Err(_) => {
                     return Response::Error {
                         message: format!("invalid step status: {status}"),
-                    }
+                    };
                 }
             };
-            run_db(db, move |db| db.update_step_status(plan_id, &step_id, parsed))
-                .await
-                .map(|_| Response::Ok)
-                .unwrap_or_else(|e| Response::Error { message: e })
+            run_db(db, move |db| {
+                db.update_step_status(plan_id, &step_id, parsed)
+            })
+            .await
+            .map(|_| Response::Ok)
+            .unwrap_or_else(|e| Response::Error { message: e })
         }
 
-        Request::DeletePlan { id } => {
-            run_db(db, move |db| db.delete_plan(id))
-                .await
-                .map(|_| Response::Ok)
-                .unwrap_or_else(|e| Response::Error { message: e })
-        }
+        Request::DeletePlan { id } => run_db(db, move |db| db.delete_plan(id))
+            .await
+            .map(|_| Response::Ok)
+            .unwrap_or_else(|e| Response::Error { message: e }),
     }
 }
 
@@ -753,12 +735,14 @@ mod tests {
             other => panic!("expected HookAck, got {other:?}"),
         }
 
-        // Verify the session state was updated in the database
-        let db_guard = db.lock().unwrap();
-        let updated = db_guard.get_session("sess-1").unwrap().unwrap();
-        assert_eq!(updated.state, SessionState::Working);
+        // Verify the session state was updated in the database.
+        // Scope the lock guard so it is definitely dropped before awaiting.
+        {
+            let db_guard = db.lock().unwrap();
+            let updated = db_guard.get_session("sess-1").unwrap().unwrap();
+            assert_eq!(updated.state, SessionState::Working);
+        }
 
-        drop(db_guard);
         drop(write_half);
         drop(reader);
 
@@ -866,9 +850,7 @@ mod tests {
         reader.read_line(&mut push_line).await.unwrap();
         let push: Response = serde_json::from_str(push_line.trim()).unwrap();
         match push {
-            Response::SessionUpdate {
-                sessions: received,
-            } => {
+            Response::SessionUpdate { sessions: received } => {
                 assert_eq!(received.len(), 1);
                 assert_eq!(received[0].id, "sess-1");
             }
@@ -970,13 +952,11 @@ mod tests {
         let accept_task = tokio::spawn({
             async move {
                 let conn1 = server.accept().await.unwrap();
-                let task1 = tokio::spawn(
-                    async move { handle_connection(conn1, db1, tx1).await.unwrap() },
-                );
+                let task1 =
+                    tokio::spawn(async move { handle_connection(conn1, db1, tx1).await.unwrap() });
                 let conn2 = server.accept().await.unwrap();
-                let task2 = tokio::spawn(
-                    async move { handle_connection(conn2, db2, tx2).await.unwrap() },
-                );
+                let task2 =
+                    tokio::spawn(async move { handle_connection(conn2, db2, tx2).await.unwrap() });
                 (task1, task2)
             }
         });
@@ -1030,13 +1010,11 @@ mod tests {
         ));
 
         // Wait for accept_task to finish spawning both handlers
-        let (server_task1, server_task2) = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            accept_task,
-        )
-        .await
-        .expect("accept task timed out")
-        .expect("accept task panicked");
+        let (server_task1, server_task2) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), accept_task)
+                .await
+                .expect("accept task timed out")
+                .expect("accept task panicked");
 
         // Broadcast
         let sessions = vec![create_test_session("sess-x", "%5")];

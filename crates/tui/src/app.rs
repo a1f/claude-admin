@@ -212,8 +212,7 @@ impl App {
         match code {
             KeyCode::Char('j') | KeyCode::Down => {
                 if !self.projects.is_empty() {
-                    self.project_index =
-                        (self.project_index + 1) % self.projects.len();
+                    self.project_index = (self.project_index + 1) % self.projects.len();
                 }
                 AppAction::None
             }
@@ -347,9 +346,7 @@ impl App {
                 AppAction::None
             }
             KeyCode::Char('s') => {
-                if let (Some(plan), Some((_, step))) =
-                    (&self.current_plan, self.selected_step())
-                {
+                if let (Some(plan), Some((_, step))) = (&self.current_plan, self.selected_step()) {
                     AppAction::SpawnStep {
                         plan_id: plan.id,
                         step_id: step.id.clone(),
@@ -381,8 +378,7 @@ impl App {
             OrchPanel::Sessions => {
                 let total = self.project_sessions().len();
                 if total > 0 {
-                    self.orch_session_index =
-                        wrap_index(self.orch_session_index, total, direction);
+                    self.orch_session_index = wrap_index(self.orch_session_index, total, direction);
                 }
             }
         }
@@ -697,10 +693,13 @@ mod tests {
     fn sample_events() -> Vec<Event> {
         vec![
             make_event(1, EventType::SessionDiscovered),
-            make_event(2, EventType::StateChanged {
-                from: SessionState::Idle,
-                to: SessionState::Working,
-            }),
+            make_event(
+                2,
+                EventType::StateChanged {
+                    from: SessionState::Idle,
+                    to: SessionState::Working,
+                },
+            ),
         ]
     }
 
@@ -846,9 +845,18 @@ mod tests {
 
     #[test]
     fn test_cycle_step_status_order() {
-        assert_eq!(cycle_step_status(StepStatus::Pending), StepStatus::InProgress);
-        assert_eq!(cycle_step_status(StepStatus::InProgress), StepStatus::Completed);
-        assert_eq!(cycle_step_status(StepStatus::Completed), StepStatus::Blocked);
+        assert_eq!(
+            cycle_step_status(StepStatus::Pending),
+            StepStatus::InProgress
+        );
+        assert_eq!(
+            cycle_step_status(StepStatus::InProgress),
+            StepStatus::Completed
+        );
+        assert_eq!(
+            cycle_step_status(StepStatus::Completed),
+            StepStatus::Blocked
+        );
         assert_eq!(cycle_step_status(StepStatus::Blocked), StepStatus::Skipped);
         assert_eq!(cycle_step_status(StepStatus::Skipped), StepStatus::Pending);
     }
@@ -987,7 +995,11 @@ mod tests {
 
     // -- Orchestrator tests --
 
-    fn make_session_with_project(id: &str, project_id: Option<i64>, step_id: Option<&str>) -> Session {
+    fn make_session_with_project(
+        id: &str,
+        project_id: Option<i64>,
+        step_id: Option<&str>,
+    ) -> Session {
         Session {
             id: id.to_string(),
             pane_id: format!("%{id}"),
@@ -1148,9 +1160,7 @@ mod tests {
     #[test]
     fn test_project_sessions_empty_when_no_plan() {
         let mut app = App::new();
-        app.update_sessions(vec![
-            make_session_with_project("s1", Some(1), None),
-        ]);
+        app.update_sessions(vec![make_session_with_project("s1", Some(1), None)]);
 
         let filtered = app.project_sessions();
         assert!(filtered.is_empty());

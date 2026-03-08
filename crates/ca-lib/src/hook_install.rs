@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -141,10 +141,7 @@ pub fn uninstall_hooks(settings_path: &Path) -> Result<bool, HookInstallError> {
     let mut settings = read_settings(settings_path)?;
     let mut modified = false;
 
-    if let Some(hooks_obj) = settings
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-    {
+    if let Some(hooks_obj) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
         for hook_type in HOOK_TYPES {
             if let Some(matchers) = hooks_obj.get_mut(*hook_type) {
                 if let Some(arr) = matchers.as_array_mut() {
@@ -166,9 +163,7 @@ pub fn uninstall_hooks(settings_path: &Path) -> Result<bool, HookInstallError> {
     Ok(modified)
 }
 
-pub fn hooks_status(
-    settings_path: &Path,
-) -> Result<Vec<(String, bool)>, HookInstallError> {
+pub fn hooks_status(settings_path: &Path) -> Result<Vec<(String, bool)>, HookInstallError> {
     let settings = read_settings(settings_path)?;
     let result = HOOK_TYPES
         .iter()
@@ -315,7 +310,10 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         for hook_type in HOOK_TYPES {
             let arr = written["hooks"][hook_type].as_array().unwrap();
-            assert!(arr.is_empty(), "{hook_type} should be empty after uninstall");
+            assert!(
+                arr.is_empty(),
+                "{hook_type} should be empty after uninstall"
+            );
         }
     }
 

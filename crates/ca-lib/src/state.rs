@@ -3,10 +3,20 @@ use crate::models::SessionState;
 /// Priority: Done (last 3 lines) > NeedsInput (prompt at end) > Working > Idle
 pub fn detect_state(content: &str) -> SessionState {
     let recent_lines: Vec<&str> = content.lines().rev().take(20).collect();
-    let recent_content = recent_lines.iter().rev().copied().collect::<Vec<_>>().join("\n");
+    let recent_content = recent_lines
+        .iter()
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let last_few_lines: Vec<&str> = content.lines().rev().take(3).collect();
-    let tail_content = last_few_lines.iter().rev().copied().collect::<Vec<_>>().join("\n");
+    let tail_content = last_few_lines
+        .iter()
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n");
 
     if is_done(&tail_content) {
         return SessionState::Done;
@@ -24,7 +34,12 @@ pub fn detect_state(content: &str) -> SessionState {
 }
 
 fn is_done(content: &str) -> bool {
-    let done_patterns = ["Session ended", "Goodbye", "exited with code", "connection closed"];
+    let done_patterns = [
+        "Session ended",
+        "Goodbye",
+        "exited with code",
+        "connection closed",
+    ];
     done_patterns.iter().any(|p| content.contains(p))
 }
 
@@ -66,14 +81,13 @@ fn is_needs_input(recent_content: &str, full_content: &str) -> bool {
         return true;
     }
 
-    if trimmed.ends_with('>')
+    if (trimmed.ends_with('>')
         || trimmed.ends_with('?')
         || trimmed.ends_with(':')
-        || trimmed.ends_with("$ ")
+        || trimmed.ends_with("$ "))
+        && !is_working(recent_content)
     {
-        if !is_working(recent_content) {
-            return true;
-        }
+        return true;
     }
 
     // Only check welcome prompts if there's no working activity in recent output
@@ -147,7 +161,8 @@ mod tests {
 
     #[test]
     fn test_detect_needs_input_approve() {
-        let content = "I'll make the following changes:\n- Update config.rs\n- Add new module\n\nApprove?";
+        let content =
+            "I'll make the following changes:\n- Update config.rs\n- Add new module\n\nApprove?";
         assert_eq!(detect_state(content), SessionState::NeedsInput);
     }
 
@@ -233,7 +248,8 @@ mod tests {
 
     #[test]
     fn test_old_done_message_ignored() {
-        let content = "Session ended\n--- new session ---\nWelcome!\nTool: Read\nReading config.rs...";
+        let content =
+            "Session ended\n--- new session ---\nWelcome!\nTool: Read\nReading config.rs...";
         assert_eq!(detect_state(content), SessionState::Working);
     }
 

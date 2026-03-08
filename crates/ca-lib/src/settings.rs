@@ -1,6 +1,6 @@
 use crate::db::{Database, DbError};
-use rusqlite::params;
 use rusqlite::OptionalExtension;
+use rusqlite::params;
 
 const DEFAULT_SETTINGS: &[(&str, &str)] = &[
     ("poll_interval", "2"),

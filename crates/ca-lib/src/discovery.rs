@@ -3,8 +3,8 @@ use crate::events::EventType;
 use crate::models::{Session, SessionState};
 use crate::state::detect_state;
 use crate::tmux::{
-    capture_pane_content, get_pane_process, is_tmux_running, list_all_panes, ClaudeLocation,
-    DetectionMethod, TmuxError, TmuxPane,
+    ClaudeLocation, DetectionMethod, TmuxError, TmuxPane, capture_pane_content, get_pane_process,
+    is_tmux_running, list_all_panes,
 };
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -71,7 +71,11 @@ pub fn discover_claude_panes() -> Result<Vec<ClaudeLocation>, DiscoveryError> {
         }
     }
 
-    tracing::debug!(count = locations.len(), total_panes = panes.len(), "Discovery scan complete");
+    tracing::debug!(
+        count = locations.len(),
+        total_panes = panes.len(),
+        "Discovery scan complete"
+    );
     Ok(locations)
 }
 
@@ -120,9 +124,8 @@ pub fn sync_sessions(db: &Database) -> Result<SyncResult, DiscoveryError> {
         match db.get_session_by_pane(&location.pane.pane_id)? {
             Some(existing) => {
                 // Update state if changed
-                let content =
-                    capture_pane_content(&location.pane.pane_id, CONTENT_CAPTURE_LINES)
-                        .unwrap_or_default();
+                let content = capture_pane_content(&location.pane.pane_id, CONTENT_CAPTURE_LINES)
+                    .unwrap_or_default();
                 let new_state = detect_state(&content);
 
                 if new_state != existing.state {
@@ -148,9 +151,8 @@ pub fn sync_sessions(db: &Database) -> Result<SyncResult, DiscoveryError> {
             }
             None => {
                 // New session
-                let content =
-                    capture_pane_content(&location.pane.pane_id, CONTENT_CAPTURE_LINES)
-                        .unwrap_or_default();
+                let content = capture_pane_content(&location.pane.pane_id, CONTENT_CAPTURE_LINES)
+                    .unwrap_or_default();
                 let state = detect_state(&content);
 
                 let session = Session {
@@ -352,9 +354,12 @@ mod tests {
     #[test]
     fn test_cleanup_mixed_active_and_stale() {
         let (db, _dir) = create_test_db();
-        db.create_session(&create_test_session("sess-1", "%0")).unwrap();
-        db.create_session(&create_test_session("sess-2", "%1")).unwrap();
-        db.create_session(&create_test_session("sess-3", "%2")).unwrap();
+        db.create_session(&create_test_session("sess-1", "%0"))
+            .unwrap();
+        db.create_session(&create_test_session("sess-2", "%1"))
+            .unwrap();
+        db.create_session(&create_test_session("sess-3", "%2"))
+            .unwrap();
 
         let active: HashSet<String> = ["%1".to_string()].into();
         let removed = cleanup_stale_sessions(&db, &active).unwrap();

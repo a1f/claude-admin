@@ -1,17 +1,20 @@
 use crate::app::App;
 use ca_lib::plan::StepStatus;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
-use ratatui::Frame;
 
 pub fn draw_projects(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     if app.projects.is_empty() {
-        let block = Paragraph::new("No projects found.")
-            .block(Block::default().title(" Projects (b: back) ").borders(Borders::ALL));
+        let block = Paragraph::new("No projects found.").block(
+            Block::default()
+                .title(" Projects (b: back) ")
+                .borders(Borders::ALL),
+        );
         frame.render_widget(block, area);
         return;
     }
@@ -20,10 +23,7 @@ pub fn draw_projects(frame: &mut Frame, app: &App) {
         .projects
         .iter()
         .map(|p| {
-            let desc = p
-                .description
-                .as_deref()
-                .unwrap_or("");
+            let desc = p.description.as_deref().unwrap_or("");
             let content = Line::from(vec![
                 Span::styled(
                     format!("[{}] ", p.status.as_str()),
@@ -38,7 +38,11 @@ pub fn draw_projects(frame: &mut Frame, app: &App) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().title(" Projects (b: back) ").borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(" Projects (b: back) ")
+                .borders(Borders::ALL),
+        )
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 
@@ -111,12 +115,7 @@ pub fn draw_plan_detail(frame: &mut Frame, app: &App) {
     draw_step_detail(frame, app, chunks[1]);
 }
 
-fn draw_step_list(
-    frame: &mut Frame,
-    app: &App,
-    plan: &ca_lib::plan::Plan,
-    area: Rect,
-) {
+fn draw_step_list(frame: &mut Frame, app: &App, plan: &ca_lib::plan::Plan, area: Rect) {
     let title = format!(" Plan: {} (s: cycle status, b: back) ", plan.name);
     let visible = app.visible_steps();
 
@@ -151,9 +150,7 @@ fn draw_step_list(
             items.push(ListItem::new(content));
 
             // Map this list row to the flat step index
-            let flat_idx = visible
-                .iter()
-                .position(|&(vp, vs)| vp == pi && vs == si);
+            let flat_idx = visible.iter().position(|&(vp, vs)| vp == pi && vs == si);
             list_index_for_step.push(flat_idx);
         }
     }
@@ -182,14 +179,8 @@ fn draw_step_detail(frame: &mut Frame, app: &App, area: Rect) {
             let color = step_color(&step.status);
 
             let mut lines = vec![
-                Line::from(vec![
-                    Span::styled("Step: ", bold),
-                    Span::raw(&step.id),
-                ]),
-                Line::from(vec![
-                    Span::styled("Phase: ", bold),
-                    Span::raw(phase_name),
-                ]),
+                Line::from(vec![Span::styled("Step: ", bold), Span::raw(&step.id)]),
+                Line::from(vec![Span::styled("Phase: ", bold), Span::raw(phase_name)]),
                 Line::from(vec![
                     Span::styled("Status: ", bold),
                     Span::styled(step.status.as_str(), Style::default().fg(color)),
@@ -217,7 +208,11 @@ fn draw_step_detail(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let detail = Paragraph::new(lines)
-        .block(Block::default().title(" Step Detail ").borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(" Step Detail ")
+                .borders(Borders::ALL),
+        )
         .wrap(Wrap { trim: true });
 
     frame.render_widget(detail, area);

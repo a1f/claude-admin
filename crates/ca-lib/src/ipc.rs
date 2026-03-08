@@ -25,25 +25,69 @@ pub enum IpcError {
 pub enum Request {
     Ping,
     ListSessions,
-    GetSession { id: String },
-    GetSessionByPane { pane_id: String },
-    GetEvents { session_id: String, limit: usize },
-    GetRecentEvents { limit: usize },
-    HookEvent { event: HookEvent },
+    GetSession {
+        id: String,
+    },
+    GetSessionByPane {
+        pane_id: String,
+    },
+    GetEvents {
+        session_id: String,
+        limit: usize,
+    },
+    GetRecentEvents {
+        limit: usize,
+    },
+    HookEvent {
+        event: HookEvent,
+    },
     Subscribe,
     ListWorkspaces,
-    CreateWorkspace { path: String, name: Option<String> },
-    DeleteWorkspace { id: i64 },
-    ListProjects { workspace_id: Option<i64> },
-    CreateProject { workspace_id: i64, name: String, description: Option<String> },
-    UpdateProjectStatus { id: i64, status: String },
-    DeleteProject { id: i64 },
-    GetPlan { id: i64 },
-    ListPlans { project_id: i64 },
-    CreatePlan { project_id: i64, name: String, content: PlanContent },
-    UpdatePlanStatus { id: i64, status: String },
-    UpdateStepStatus { plan_id: i64, step_id: String, status: String },
-    DeletePlan { id: i64 },
+    CreateWorkspace {
+        path: String,
+        name: Option<String>,
+    },
+    DeleteWorkspace {
+        id: i64,
+    },
+    ListProjects {
+        workspace_id: Option<i64>,
+    },
+    CreateProject {
+        workspace_id: i64,
+        name: String,
+        description: Option<String>,
+    },
+    UpdateProjectStatus {
+        id: i64,
+        status: String,
+    },
+    DeleteProject {
+        id: i64,
+    },
+    GetPlan {
+        id: i64,
+    },
+    ListPlans {
+        project_id: i64,
+    },
+    CreatePlan {
+        project_id: i64,
+        name: String,
+        content: PlanContent,
+    },
+    UpdatePlanStatus {
+        id: i64,
+        status: String,
+    },
+    UpdateStepStatus {
+        plan_id: i64,
+        step_id: String,
+        status: String,
+    },
+    DeletePlan {
+        id: i64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

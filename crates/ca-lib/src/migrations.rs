@@ -30,8 +30,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), DbError> {
 
     let current_version = get_schema_version(conn)?;
 
-    let migrations: &[(i64, fn(&Connection) -> Result<(), rusqlite::Error>)] =
-        &[(1, migrate_001_session_project_link)];
+    type MigrationFn = fn(&Connection) -> Result<(), rusqlite::Error>;
+    let migrations: &[(i64, MigrationFn)] = &[(1, migrate_001_session_project_link)];
 
     for &(version, migrate_fn) in migrations {
         if version > current_version {
@@ -129,12 +129,14 @@ mod tests {
     fn test_migration_adds_columns() {
         let conn = create_legacy_db();
 
-        assert!(conn
-            .prepare("SELECT project_id FROM sessions LIMIT 0")
-            .is_err());
-        assert!(conn
-            .prepare("SELECT plan_step_id FROM sessions LIMIT 0")
-            .is_err());
+        assert!(
+            conn.prepare("SELECT project_id FROM sessions LIMIT 0")
+                .is_err()
+        );
+        assert!(
+            conn.prepare("SELECT plan_step_id FROM sessions LIMIT 0")
+                .is_err()
+        );
 
         run_migrations(&conn).unwrap();
 

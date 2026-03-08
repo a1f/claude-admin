@@ -36,8 +36,14 @@ pub fn generate_plan_context(plan: &Plan, step_id: &str) -> Result<String, Spawn
         .find(|s| s.id == step_id)
         .ok_or_else(|| SpawnError::StepNotFound(step_id.to_string()))?;
 
-    let completed = all_steps.iter().filter(|s| s.status == StepStatus::Completed).count();
-    let in_progress = all_steps.iter().filter(|s| s.status == StepStatus::InProgress).count();
+    let completed = all_steps
+        .iter()
+        .filter(|s| s.status == StepStatus::Completed)
+        .count();
+    let in_progress = all_steps
+        .iter()
+        .filter(|s| s.status == StepStatus::InProgress)
+        .count();
     let total = all_steps.len();
     let remaining = total - completed - in_progress;
 
@@ -346,7 +352,10 @@ mod tests {
         let path = write_context_file(content).unwrap();
 
         assert!(path.exists());
-        assert!(path.to_string_lossy().starts_with("/tmp/claude-admin-context-"));
+        assert!(
+            path.to_string_lossy()
+                .starts_with("/tmp/claude-admin-context-")
+        );
         assert!(path.to_string_lossy().ends_with(".md"));
 
         let read_back = std::fs::read_to_string(&path).unwrap();

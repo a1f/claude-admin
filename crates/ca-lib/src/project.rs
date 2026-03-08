@@ -1,7 +1,7 @@
 use crate::db::{Database, DbError};
 use crate::git;
-use rusqlite::params;
 use rusqlite::OptionalExtension;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
@@ -146,7 +146,7 @@ impl Database {
                 FROM projects WHERE id = ?1
                 "#,
                 params![id],
-                |row| row_to_project(row),
+                row_to_project,
             )
             .optional()?;
 
@@ -157,10 +157,7 @@ impl Database {
         }
     }
 
-    pub fn list_projects_by_workspace(
-        &self,
-        workspace_id: i64,
-    ) -> Result<Vec<Project>, DbError> {
+    pub fn list_projects_by_workspace(&self, workspace_id: i64) -> Result<Vec<Project>, DbError> {
         let mut stmt = self.connection().prepare(
             r#"
             SELECT id, workspace_id, name, description, status,
@@ -171,7 +168,7 @@ impl Database {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![workspace_id], |row| row_to_project(row))?;
+        let rows = stmt.query_map(params![workspace_id], row_to_project)?;
 
         let mut projects = Vec::new();
         for row_result in rows {
@@ -190,7 +187,7 @@ impl Database {
             "#,
         )?;
 
-        let rows = stmt.query_map([], |row| row_to_project(row))?;
+        let rows = stmt.query_map([], row_to_project)?;
 
         let mut projects = Vec::new();
         for row_result in rows {
@@ -199,11 +196,7 @@ impl Database {
         Ok(projects)
     }
 
-    pub fn update_project_status(
-        &self,
-        id: i64,
-        status: ProjectStatus,
-    ) -> Result<(), DbError> {
+    pub fn update_project_status(&self, id: i64, status: ProjectStatus) -> Result<(), DbError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -254,9 +247,9 @@ impl Database {
         name: &str,
         description: Option<&str>,
     ) -> Result<Project, DbError> {
-        let workspace = self
-            .get_workspace(workspace_id)?
-            .ok_or_else(|| DbError::InvalidState(format!("workspace {} not found", workspace_id)))?;
+        let workspace = self.get_workspace(workspace_id)?.ok_or_else(|| {
+            DbError::InvalidState(format!("workspace {} not found", workspace_id))
+        })?;
 
         let workspace_path = Path::new(&workspace.path);
 
@@ -271,11 +264,7 @@ impl Database {
         match git::create_worktree(workspace_path, &branch, wt_path) {
             Ok(()) => {
                 let project = self.create_project(workspace_id, name, description)?;
-                self.update_project_worktree(
-                    project.id,
-                    Some(&wt_path_str),
-                    Some(&branch),
-                )?;
+                self.update_project_worktree(project.id, Some(&wt_path_str), Some(&branch))?;
                 // Re-fetch to return accurate state
                 self.get_project(project.id)?
                     .ok_or_else(|| DbError::InvalidState("project vanished after create".into()))
@@ -512,9 +501,7 @@ mod tests {
         let (db, _dir) = create_test_db();
         let ws_id = create_test_workspace(&db);
 
-        let project = db
-            .create_project(ws_id, "Soon Archived", None)
-            .unwrap();
+        let project = db.create_project(ws_id, "Soon Archived", None).unwrap();
         let original_updated_at = project.updated_at;
 
         db.archive_project(project.id).unwrap();
@@ -540,10 +527,7 @@ mod tests {
 
     #[test]
     fn test_project_status_from_str() {
-        assert_eq!(
-            "active".parse::<ProjectStatus>(),
-            Ok(ProjectStatus::Active)
-        );
+        assert_eq!("active".parse::<ProjectStatus>(), Ok(ProjectStatus::Active));
         assert_eq!(
             "running".parse::<ProjectStatus>(),
             Ok(ProjectStatus::Running)
@@ -635,12 +619,8 @@ mod tests {
         let ws_id = create_test_workspace(&db);
 
         let project = db.create_project(ws_id, "Archivable", None).unwrap();
-        db.update_project_worktree(
-            project.id,
-            Some("/fake/wt"),
-            Some("project/archivable"),
-        )
-        .unwrap();
+        db.update_project_worktree(project.id, Some("/fake/wt"), Some("project/archivable"))
+            .unwrap();
 
         db.archive_project(project.id).unwrap();
 

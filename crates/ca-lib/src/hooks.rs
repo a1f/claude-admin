@@ -31,18 +31,12 @@ pub fn infer_state_from_hook(hook_type: &str) -> Option<SessionState> {
     }
 }
 
-pub fn find_session_for_hook(
-    db: &Database,
-    working_dir: &str,
-) -> Result<Option<Session>, DbError> {
+pub fn find_session_for_hook(db: &Database, working_dir: &str) -> Result<Option<Session>, DbError> {
     let sessions = db.list_sessions()?;
     Ok(sessions.into_iter().find(|s| s.working_dir == working_dir))
 }
 
-pub fn apply_hook_event(
-    db: &Database,
-    event: &HookEvent,
-) -> Result<Option<String>, HookError> {
+pub fn apply_hook_event(db: &Database, event: &HookEvent) -> Result<Option<String>, HookError> {
     let session = match find_session_for_hook(db, &event.working_dir)? {
         Some(s) => s,
         None => return Ok(None),
@@ -95,12 +89,18 @@ mod tests {
 
     #[test]
     fn test_infer_pre_tool_use() {
-        assert_eq!(infer_state_from_hook("PreToolUse"), Some(SessionState::Working));
+        assert_eq!(
+            infer_state_from_hook("PreToolUse"),
+            Some(SessionState::Working)
+        );
     }
 
     #[test]
     fn test_infer_post_tool_use() {
-        assert_eq!(infer_state_from_hook("PostToolUse"), Some(SessionState::Working));
+        assert_eq!(
+            infer_state_from_hook("PostToolUse"),
+            Some(SessionState::Working)
+        );
     }
 
     #[test]
@@ -126,12 +126,18 @@ mod tests {
 
     #[test]
     fn test_infer_session_start() {
-        assert_eq!(infer_state_from_hook("SessionStart"), Some(SessionState::Idle));
+        assert_eq!(
+            infer_state_from_hook("SessionStart"),
+            Some(SessionState::Idle)
+        );
     }
 
     #[test]
     fn test_infer_session_end() {
-        assert_eq!(infer_state_from_hook("SessionEnd"), Some(SessionState::Done));
+        assert_eq!(
+            infer_state_from_hook("SessionEnd"),
+            Some(SessionState::Done)
+        );
     }
 
     #[test]

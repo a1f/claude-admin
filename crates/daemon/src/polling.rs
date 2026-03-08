@@ -16,7 +16,10 @@ pub async fn run_polling_loop(
     // First tick fires immediately -- skip it to let daemon fully initialize
     interval.tick().await;
 
-    tracing::info!(interval_secs = POLL_INTERVAL.as_secs(), "Polling loop started");
+    tracing::info!(
+        interval_secs = POLL_INTERVAL.as_secs(),
+        "Polling loop started"
+    );
 
     loop {
         tokio::select! {
@@ -31,10 +34,7 @@ pub async fn run_polling_loop(
     }
 }
 
-async fn poll_once(
-    db: &Arc<Mutex<Database>>,
-    update_tx: &broadcast::Sender<Vec<Session>>,
-) {
+async fn poll_once(db: &Arc<Mutex<Database>>, update_tx: &broadcast::Sender<Vec<Session>>) {
     let db_clone = Arc::clone(db);
     let result = tokio::task::spawn_blocking(move || {
         let db = db_clone.lock().expect("database mutex poisoned");
@@ -44,9 +44,8 @@ async fn poll_once(
 
     match result {
         Ok(Ok(sync)) => {
-            let has_changes = !sync.discovered.is_empty()
-                || !sync.updated.is_empty()
-                || !sync.removed.is_empty();
+            let has_changes =
+                !sync.discovered.is_empty() || !sync.updated.is_empty() || !sync.removed.is_empty();
 
             if has_changes {
                 tracing::info!(

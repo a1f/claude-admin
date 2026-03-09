@@ -104,6 +104,7 @@ pub struct App {
     pub project_picker: Option<Vec<Project>>,
     pub picker_index: usize,
     pub status_message: Option<(String, Instant)>,
+    pub tick_count: u64,
 }
 
 impl App {
@@ -133,6 +134,7 @@ impl App {
             project_picker: None,
             picker_index: 0,
             status_message: None,
+            tick_count: 0,
         }
     }
 
@@ -163,6 +165,16 @@ impl App {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = Some((msg.into(), Instant::now()));
+    }
+
+    pub fn tick(&mut self) {
+        self.tick_count = self.tick_count.wrapping_add(1);
+    }
+
+    /// Whether the "blink" is currently in the ON phase (for visual indicators).
+    /// Toggles roughly every 500ms (10 ticks at 50ms poll interval).
+    pub fn blink_on(&self) -> bool {
+        (self.tick_count / 10) % 2 == 0
     }
 
     pub fn clear_stale_status(&mut self) {
@@ -2457,5 +2469,51 @@ mod tests {
         assert_eq!(app.session_state_counts(), (2, 1, 0, 0));
         app.show_untracked = true;
         assert_eq!(app.session_state_counts(), (2, 1, 0, 0));
+    }
+
+    #[test]
+    fn test_tick_increments() {
+        let mut app = App::new();
+        assert_eq!(app.tick_count, 0);
+        app.tick();
+        assert_eq!(app.tick_count, 1);
+        app.tick();
+        assert_eq!(app.tick_count, 2);
+    }
+
+    #[test]
+    fn test_blink_on_initial() {
+        let app = App::new();
+        assert!(
+            app.blink_on(),
+            "blink should start in ON phase at tick_count=0"
+        );
+    }
+
+    #[test]
+    fn test_blink_on_toggles() {
+        let mut app = App::new();
+        // Ticks 0..9 => blink ON (tick_count/10 == 0, 0%2 == 0)
+        assert!(app.blink_on());
+        for _ in 0..10 {
+            app.tick();
+        }
+        // Ticks 10..19 => blink OFF (tick_count/10 == 1, 1%2 == 1)
+        assert!(!app.blink_on());
+        for _ in 0..10 {
+            app.tick();
+        }
+        // Ticks 20..29 => blink ON again (tick_count/10 == 2, 2%2 == 0)
+        assert!(app.blink_on());
+    }
+
+    #[test]
+    fn test_tick_wraps() {
+        let mut app = App::new();
+        app.tick_count = u64::MAX;
+        app.tick();
+        assert_eq!(app.tick_count, 0, "wrapping_add should wrap to 0");
+        // blink_on should still work after wrapping
+        assert!(app.blink_on());
     }
 }

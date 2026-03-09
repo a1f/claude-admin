@@ -81,6 +81,7 @@ async fn run_event_loop(
 ) -> io::Result<()> {
     loop {
         app.clear_stale_status();
+        app.tick();
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if event::poll(Duration::ZERO)? {

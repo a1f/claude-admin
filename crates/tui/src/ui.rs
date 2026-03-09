@@ -86,6 +86,7 @@ fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     let visible = app.visible_sessions();
+    let blink = app.blink_on();
     let items: Vec<ListItem> = visible
         .iter()
         .enumerate()
@@ -96,15 +97,46 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
                 "  ".to_string()
             };
             let indicator = state_indicator(&s.state);
-            let color = state_color(&s.state);
+
+            let (indicator_style, state_style, text_style) = match s.state {
+                SessionState::NeedsInput => {
+                    if blink {
+                        let bold_yellow = Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD);
+                        (bold_yellow, bold_yellow, bold_yellow)
+                    } else {
+                        let yellow = Style::default().fg(Color::Yellow);
+                        (yellow, yellow, Style::default())
+                    }
+                }
+                SessionState::Working => {
+                    let green = if blink {
+                        Color::LightGreen
+                    } else {
+                        Color::Green
+                    };
+                    let gs = Style::default().fg(green);
+                    (gs, gs, Style::default())
+                }
+                SessionState::Done => {
+                    let dim = Style::default().fg(Color::DarkGray);
+                    (dim, dim, dim)
+                }
+                SessionState::Idle => {
+                    let white = Style::default().fg(Color::White);
+                    (white, white, Style::default())
+                }
+            };
+
             let content = Line::from(vec![
                 Span::styled(pos, Style::default().fg(Color::DarkGray)),
-                Span::styled(indicator, Style::default().fg(color)),
-                Span::raw(&s.id),
+                Span::styled(indicator, indicator_style),
+                Span::styled(&*s.id, text_style),
                 Span::raw("  "),
-                Span::styled(s.state.as_str(), Style::default().fg(color)),
+                Span::styled(s.state.as_str(), state_style),
                 Span::raw("  "),
-                Span::raw(&s.working_dir),
+                Span::styled(&*s.working_dir, text_style),
             ]);
             ListItem::new(content)
         })

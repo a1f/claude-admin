@@ -1,9 +1,14 @@
-use ca_lib::db::Database;
-use ca_lib::models::Session;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use ca_lib::db::Database;
+use ca_lib::models::{Session, SessionState};
+use ca_lib::notify::NotificationConfig;
 use tokio::sync::broadcast;
 use tokio::time;
+
+use crate::notifier::Notifier;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -12,6 +17,13 @@ pub async fn run_polling_loop(
     mut shutdown_rx: broadcast::Receiver<()>,
     update_tx: broadcast::Sender<Vec<Session>>,
 ) {
+    let config = {
+        let db = db.lock().expect("database mutex poisoned");
+        NotificationConfig::from_settings(&db)
+    };
+    let mut notifier = Notifier::new(config);
+    let mut previous_states: HashMap<String, SessionState> = HashMap::new();
+
     let mut interval = time::interval(POLL_INTERVAL);
     // First tick fires immediately -- skip it to let daemon fully initialize
     interval.tick().await;
@@ -24,7 +36,7 @@ pub async fn run_polling_loop(
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                poll_once(&db, &update_tx).await;
+                poll_once(&db, &update_tx, &mut notifier, &mut previous_states).await;
             }
             _ = shutdown_rx.recv() => {
                 tracing::info!("Polling loop received shutdown signal");
@@ -34,7 +46,12 @@ pub async fn run_polling_loop(
     }
 }
 
-async fn poll_once(db: &Arc<Mutex<Database>>, update_tx: &broadcast::Sender<Vec<Session>>) {
+async fn poll_once(
+    db: &Arc<Mutex<Database>>,
+    update_tx: &broadcast::Sender<Vec<Session>>,
+    notifier: &mut Notifier,
+    previous_states: &mut HashMap<String, SessionState>,
+) {
     let db_clone = Arc::clone(db);
     let result = tokio::task::spawn_blocking(move || {
         let db = db_clone.lock().expect("database mutex poisoned");
@@ -58,6 +75,8 @@ async fn poll_once(db: &Arc<Mutex<Database>>, update_tx: &broadcast::Sender<Vec<
             } else {
                 tracing::trace!("Discovery poll: no changes");
             }
+
+            check_notifications(db, notifier, previous_states).await;
         }
         Ok(Err(e)) => {
             tracing::warn!(error = %e, "Discovery poll failed");
@@ -65,6 +84,50 @@ async fn poll_once(db: &Arc<Mutex<Database>>, update_tx: &broadcast::Sender<Vec<
         Err(e) => {
             tracing::error!(error = %e, "Discovery poll task panicked");
         }
+    }
+}
+
+/// Compare current session states against previous snapshot, fire
+/// notifications for transitions, then update the snapshot.
+async fn check_notifications(
+    db: &Arc<Mutex<Database>>,
+    notifier: &mut Notifier,
+    previous_states: &mut HashMap<String, SessionState>,
+) {
+    let db_clone = Arc::clone(db);
+    let sessions = tokio::task::spawn_blocking(move || {
+        let db = db_clone.lock().expect("database mutex poisoned");
+        db.list_sessions()
+    })
+    .await;
+
+    let sessions = match sessions {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "Failed to fetch sessions for notifications");
+            return;
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Notification session query task panicked");
+            return;
+        }
+    };
+
+    for session in &sessions {
+        if let Some(prev_state) = previous_states.get(&session.id) {
+            if *prev_state != session.state {
+                notifier.check_and_notify(&session.id, prev_state, &session.state);
+            }
+        }
+    }
+
+    // Rebuild previous_states from current snapshot
+    let active_ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+    notifier.cleanup_stale(&active_ids);
+
+    previous_states.clear();
+    for session in sessions {
+        previous_states.insert(session.id, session.state);
     }
 }
 

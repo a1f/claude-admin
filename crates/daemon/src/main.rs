@@ -1,4 +1,5 @@
 mod logging;
+mod notifier;
 mod pid;
 mod polling;
 mod socket;

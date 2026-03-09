@@ -1,4 +1,4 @@
-use crate::app::{App, ViewMode};
+use crate::app::{App, InputMode, ViewMode};
 use crate::plan_view;
 use crate::project_view;
 use ca_lib::events::EventType;
@@ -10,18 +10,32 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+
+    let (main_area, bar_area) = if app.input_mode == InputMode::Command {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (area, None)
+    };
+
     match app.view_mode {
-        ViewMode::Sessions => draw_sessions(frame, app),
-        ViewMode::Projects => plan_view::draw_projects(frame, app),
-        ViewMode::Plans => plan_view::draw_plans(frame, app),
-        ViewMode::PlanDetail => plan_view::draw_plan_detail(frame, app),
-        ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app),
+        ViewMode::Sessions => draw_sessions(frame, app, main_area),
+        ViewMode::Projects => plan_view::draw_projects(frame, app, main_area),
+        ViewMode::Plans => plan_view::draw_plans(frame, app, main_area),
+        ViewMode::PlanDetail => plan_view::draw_plan_detail(frame, app, main_area),
+        ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app, main_area),
+    }
+
+    if let Some(bar) = bar_area {
+        draw_command_bar(frame, app, bar);
     }
 }
 
-fn draw_sessions(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-
+fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
     if app.sessions.is_empty() {
         let msg = if app.connected {
             "No sessions found. Waiting for data..."
@@ -154,4 +168,10 @@ fn state_color(state: &SessionState) -> Color {
         SessionState::Done => Color::DarkGray,
         SessionState::Idle => Color::White,
     }
+}
+
+fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let display = format!(":{}", app.command_palette.input.value());
+    let bar = Paragraph::new(display).style(Style::default().fg(Color::White).bg(Color::DarkGray));
+    frame.render_widget(bar, area);
 }

@@ -1,4 +1,5 @@
 mod app;
+mod command_palette;
 mod input;
 mod plan_view;
 mod project_view;
@@ -162,6 +163,9 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
             let _ = std::process::Command::new("tmux")
                 .args(["select-pane", "-t", &pane_id])
                 .output();
+        }
+        AppAction::ExecuteCommand(_cmd) => {
+            // Command execution will be wired in M2.5 (command parser)
         }
     }
 }

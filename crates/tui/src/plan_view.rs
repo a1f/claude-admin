@@ -6,9 +6,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
-pub fn draw_projects(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-
+pub fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
     if app.projects.is_empty() {
         let block = Paragraph::new("No projects found.").block(
             Block::default()
@@ -52,9 +50,7 @@ pub fn draw_projects(frame: &mut Frame, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-pub fn draw_plans(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-
+pub fn draw_plans(frame: &mut Frame, app: &App, area: Rect) {
     let project_name = app
         .projects
         .get(app.project_index)
@@ -96,9 +92,7 @@ pub fn draw_plans(frame: &mut Frame, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-pub fn draw_plan_detail(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-
+pub fn draw_plan_detail(frame: &mut Frame, app: &App, area: Rect) {
     let Some(plan) = &app.current_plan else {
         let block = Paragraph::new("No plan loaded.")
             .block(Block::default().title(" Plan ").borders(Borders::ALL));

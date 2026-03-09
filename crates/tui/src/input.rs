@@ -1,12 +1,11 @@
 /// A single-line text input widget with cursor management.
-#[allow(dead_code)]
 pub struct TextInput {
     value: String,
     cursor_pos: usize,
+    #[allow(dead_code)]
     label: String,
 }
 
-#[allow(dead_code)]
 impl TextInput {
     pub fn new(label: &str) -> Self {
         Self {
@@ -61,14 +60,17 @@ impl TextInput {
         &self.value
     }
 
+    #[allow(dead_code)]
     pub fn cursor_pos(&self) -> usize {
         self.cursor_pos
     }
 
+    #[allow(dead_code)]
     pub fn label(&self) -> &str {
         &self.label
     }
 
+    #[allow(dead_code)]
     pub fn set_value(&mut self, s: &str) {
         self.value = s.to_string();
         self.cursor_pos = self.value.len();

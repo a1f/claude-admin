@@ -1,3 +1,4 @@
+use crate::command_palette::CommandPalette;
 use ca_lib::events::Event;
 use ca_lib::models::Session;
 use ca_lib::plan::{Plan, Step, StepStatus};
@@ -5,11 +6,12 @@ use ca_lib::project::Project;
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum InputMode {
     Normal,
     Command,
+    #[allow(dead_code)]
     Form,
+    #[allow(dead_code)]
     Help,
 }
 
@@ -45,6 +47,7 @@ pub enum AppAction {
         step_id: String,
     },
     AttachSession(String),
+    ExecuteCommand(String),
 }
 
 pub struct App {
@@ -63,6 +66,7 @@ pub struct App {
     pub step_index: usize,
     pub orch_panel: OrchPanel,
     pub orch_session_index: usize,
+    pub command_palette: CommandPalette,
 }
 
 impl App {
@@ -83,6 +87,7 @@ impl App {
             step_index: 0,
             orch_panel: OrchPanel::Steps,
             orch_session_index: 0,
+            command_palette: CommandPalette::new(),
         }
     }
 
@@ -180,17 +185,26 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if self.input_mode != InputMode::Normal {
-            if key.code == KeyCode::Esc {
-                self.input_mode = InputMode::Normal;
-                return AppAction::None;
-            }
-            return AppAction::None;
+            return match self.input_mode {
+                InputMode::Command => self.handle_command_key(key),
+                _ => {
+                    if key.code == KeyCode::Esc {
+                        self.input_mode = InputMode::Normal;
+                    }
+                    AppAction::None
+                }
+            };
         }
 
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.should_quit = true;
                 AppAction::Quit
+            }
+            KeyCode::Char(':') => {
+                self.input_mode = InputMode::Command;
+                self.command_palette.open();
+                AppAction::None
             }
             _ => match self.view_mode {
                 ViewMode::Sessions => self.handle_sessions_key(key.code),
@@ -199,6 +213,56 @@ impl App {
                 ViewMode::PlanDetail => self.handle_plan_detail_key(key.code),
                 ViewMode::Orchestrator => self.handle_orchestrator_key(key.code),
             },
+        }
+    }
+
+    fn handle_command_key(&mut self, key: KeyEvent) -> AppAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.command_palette.close();
+                self.input_mode = InputMode::Normal;
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                if let Some(cmd) = self.command_palette.submit() {
+                    self.input_mode = InputMode::Normal;
+                    self.command_palette.message = Some(format!("Executed: {cmd}"));
+                    AppAction::ExecuteCommand(cmd)
+                } else {
+                    self.command_palette.close();
+                    self.input_mode = InputMode::Normal;
+                    AppAction::None
+                }
+            }
+            KeyCode::Backspace => {
+                self.command_palette.input.backspace();
+                AppAction::None
+            }
+            KeyCode::Delete => {
+                self.command_palette.input.delete_char();
+                AppAction::None
+            }
+            KeyCode::Left => {
+                self.command_palette.input.move_left();
+                AppAction::None
+            }
+            KeyCode::Right => {
+                self.command_palette.input.move_right();
+                AppAction::None
+            }
+            KeyCode::Home => {
+                self.command_palette.input.move_home();
+                AppAction::None
+            }
+            KeyCode::End => {
+                self.command_palette.input.move_end();
+                AppAction::None
+            }
+            KeyCode::Char(c) => {
+                self.command_palette.input.insert_char(c);
+                AppAction::None
+            }
+            _ => AppAction::None,
         }
     }
 
@@ -1258,5 +1322,69 @@ mod tests {
         let action = app.handle_key(key(KeyCode::Char('j')));
         assert_eq!(app.selected_index, 0);
         assert!(matches!(action, AppAction::None));
+    }
+
+    // -- Command palette tests --
+
+    #[test]
+    fn test_colon_opens_command_palette() {
+        let mut app = App::new();
+        let action = app.handle_key(key(KeyCode::Char(':')));
+        assert_eq!(app.input_mode, InputMode::Command);
+        assert!(app.command_palette.visible);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_command_mode_typing() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char(':')));
+        app.handle_key(key(KeyCode::Char('h')));
+        app.handle_key(key(KeyCode::Char('i')));
+        assert_eq!(app.command_palette.input.value(), "hi");
+    }
+
+    #[test]
+    fn test_command_mode_enter_executes() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char(':')));
+        app.handle_key(key(KeyCode::Char('h')));
+        app.handle_key(key(KeyCode::Char('i')));
+        let action = app.handle_key(key(KeyCode::Enter));
+        match action {
+            AppAction::ExecuteCommand(cmd) => assert_eq!(cmd, "hi"),
+            _ => panic!("expected ExecuteCommand"),
+        }
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_command_mode_esc_closes() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char(':')));
+        app.handle_key(key(KeyCode::Char('h')));
+        let action = app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(!app.command_palette.visible);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_command_mode_empty_enter_closes() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char(':')));
+        let action = app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_command_mode_backspace() {
+        let mut app = App::new();
+        app.handle_key(key(KeyCode::Char(':')));
+        app.handle_key(key(KeyCode::Char('a')));
+        app.handle_key(key(KeyCode::Char('b')));
+        app.handle_key(key(KeyCode::Backspace));
+        assert_eq!(app.command_palette.input.value(), "a");
     }
 }

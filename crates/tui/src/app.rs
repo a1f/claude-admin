@@ -1,9 +1,11 @@
 use crate::command_palette::CommandPalette;
 use crate::form::{FormKind, FormOverlay};
 use ca_lib::events::Event;
+use ca_lib::git_ops::DiffFile;
 use ca_lib::models::{Session, SessionState};
 use ca_lib::plan::{Plan, Step, StepStatus};
 use ca_lib::project::Project;
+use ca_lib::review::Review;
 use ca_lib::workspace::Workspace;
 use crossterm::event::{KeyCode, KeyEvent};
 use std::time::{Duration, Instant};
@@ -23,6 +25,7 @@ pub enum ViewMode {
     Plans,
     PlanDetail,
     Orchestrator,
+    Review,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +80,16 @@ pub enum AppAction {
         session_id: String,
         project_id: i64,
     },
+    #[allow(dead_code)]
+    LoadReview(i64),
+    #[allow(dead_code)]
+    LoadReviewDiff,
+    AddReviewComment {
+        review_id: i64,
+        file_path: String,
+        line_number: u32,
+        body: String,
+    },
 }
 
 pub struct App {
@@ -105,6 +118,13 @@ pub struct App {
     pub picker_index: usize,
     pub status_message: Option<(String, Instant)>,
     pub tick_count: u64,
+    pub review: Option<Review>,
+    pub review_diff_files: Vec<DiffFile>,
+    pub review_file_index: usize,
+    pub review_scroll: u16,
+    pub review_comment_mode: bool,
+    pub review_comment_input: crate::input::TextInput,
+    pub review_comment_line: Option<u32>,
 }
 
 impl App {
@@ -135,6 +155,13 @@ impl App {
             picker_index: 0,
             status_message: None,
             tick_count: 0,
+            review: None,
+            review_diff_files: Vec::new(),
+            review_file_index: 0,
+            review_scroll: 0,
+            review_comment_mode: false,
+            review_comment_input: crate::input::TextInput::new("Comment"),
+            review_comment_line: None,
         }
     }
 
@@ -320,6 +347,11 @@ impl App {
             return self.handle_picker_key(key);
         }
 
+        // Comment mode intercepts all keys before global handlers
+        if self.review_comment_mode {
+            return self.handle_review_comment_key(key);
+        }
+
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.should_quit = true;
@@ -340,6 +372,7 @@ impl App {
                 ViewMode::Plans => self.handle_plans_key(key.code),
                 ViewMode::PlanDetail => self.handle_plan_detail_key(key.code),
                 ViewMode::Orchestrator => self.handle_orchestrator_key(key.code),
+                ViewMode::Review => self.handle_review_key(key),
             },
         }
     }
@@ -802,6 +835,151 @@ impl App {
             }
             _ => AppAction::None,
         }
+    }
+
+    fn handle_review_key(&mut self, key: KeyEvent) -> AppAction {
+        if self.review_comment_mode {
+            return self.handle_review_comment_key(key);
+        }
+
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.review_scroll = self.review_scroll.saturating_add(1);
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.review_scroll = self.review_scroll.saturating_sub(1);
+                AppAction::None
+            }
+            KeyCode::Char('n') => {
+                self.review_scroll = self.next_hunk_scroll();
+                AppAction::None
+            }
+            KeyCode::Char('p') => {
+                self.review_scroll = self.prev_hunk_scroll();
+                AppAction::None
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if self.review_file_index > 0 {
+                    self.review_file_index -= 1;
+                    self.review_scroll = 0;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if !self.review_diff_files.is_empty()
+                    && self.review_file_index < self.review_diff_files.len() - 1
+                {
+                    self.review_file_index += 1;
+                    self.review_scroll = 0;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('c') => {
+                self.review_comment_mode = true;
+                self.review_comment_line = Some(self.review_scroll as u32);
+                self.review_comment_input.clear();
+                AppAction::None
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::PlanDetail;
+                self.review = None;
+                self.review_diff_files.clear();
+                self.review_file_index = 0;
+                self.review_scroll = 0;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_review_comment_key(&mut self, key: KeyEvent) -> AppAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.review_comment_mode = false;
+                self.review_comment_line = None;
+                self.review_comment_input.clear();
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                let body = self.review_comment_input.value().to_string();
+                if body.is_empty() {
+                    self.review_comment_mode = false;
+                    self.review_comment_line = None;
+                    return AppAction::None;
+                }
+
+                let review_id = self.review.as_ref().map(|r| r.id).unwrap_or(0);
+                let file_path = self
+                    .review_diff_files
+                    .get(self.review_file_index)
+                    .map(|f| f.new_path.clone())
+                    .unwrap_or_default();
+                let line_number = self.review_comment_line.unwrap_or(0);
+
+                self.review_comment_mode = false;
+                self.review_comment_line = None;
+                self.review_comment_input.clear();
+
+                AppAction::AddReviewComment {
+                    review_id,
+                    file_path,
+                    line_number,
+                    body,
+                }
+            }
+            KeyCode::Backspace => {
+                self.review_comment_input.backspace();
+                AppAction::None
+            }
+            KeyCode::Delete => {
+                self.review_comment_input.delete_char();
+                AppAction::None
+            }
+            KeyCode::Char(c) => {
+                self.review_comment_input.insert_char(c);
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    /// Find the scroll position of the next hunk header in the current file.
+    fn next_hunk_scroll(&self) -> u16 {
+        let positions = self.hunk_header_positions();
+        for &pos in &positions {
+            if pos > self.review_scroll {
+                return pos;
+            }
+        }
+        self.review_scroll
+    }
+
+    /// Find the scroll position of the previous hunk header in the current file.
+    fn prev_hunk_scroll(&self) -> u16 {
+        let positions = self.hunk_header_positions();
+        for &pos in positions.iter().rev() {
+            if pos < self.review_scroll {
+                return pos;
+            }
+        }
+        self.review_scroll
+    }
+
+    /// Compute the line positions (as scroll offsets) of each hunk header
+    /// for the currently selected diff file.
+    fn hunk_header_positions(&self) -> Vec<u16> {
+        let Some(file) = self.review_diff_files.get(self.review_file_index) else {
+            return Vec::new();
+        };
+        let mut positions = Vec::new();
+        let mut line_offset: u16 = 0;
+        for hunk in &file.hunks {
+            positions.push(line_offset);
+            // +1 for the hunk header line itself
+            line_offset += 1 + hunk.lines.len() as u16;
+        }
+        positions
     }
 
     fn orch_navigate(&mut self, direction: isize) {

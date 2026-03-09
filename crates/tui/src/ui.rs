@@ -3,6 +3,7 @@ use crate::command_palette::CommandPalette;
 use crate::form::FormOverlay;
 use crate::plan_view;
 use crate::project_view;
+use crate::review_view;
 use ca_lib::events::EventType;
 use ca_lib::models::SessionState;
 use ca_lib::project::Project;
@@ -30,6 +31,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ViewMode::Plans => plan_view::draw_plans(frame, app, main_area),
         ViewMode::PlanDetail => plan_view::draw_plan_detail(frame, app, main_area),
         ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app, main_area),
+        ViewMode::Review => review_view::draw_review(frame, app, main_area),
     }
 
     if app.input_mode == InputMode::Command {
@@ -284,6 +286,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Plans => "n:new d:del b:back ?:help",
         ViewMode::PlanDetail => "s:status o:orch b:back ?:help",
         ViewMode::Orchestrator => "Tab:panel s:spawn a:attach b:back ?:help",
+        ViewMode::Review => "j/k:scroll n/p:hunk h/l:file c:comment b:back ?:help",
     };
 
     let left = Span::styled(
@@ -480,6 +483,7 @@ fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Plans => "Plans",
         ViewMode::PlanDetail => "Plan Detail",
         ViewMode::Orchestrator => "Orchestrator",
+        ViewMode::Review => "Review",
     };
 
     let block = Block::default()

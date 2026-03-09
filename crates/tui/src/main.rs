@@ -6,6 +6,7 @@ mod help;
 mod input;
 mod plan_view;
 mod project_view;
+mod review_view;
 mod ui;
 
 use app::{App, AppAction, InputMode};
@@ -274,7 +275,54 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 }
             }
         }
+        AppAction::LoadReview(review_id) => {
+            if let Some(db) = db {
+                if let Ok(Some(review)) = db.get_review(review_id) {
+                    app.review = Some(review);
+                    app.view_mode = app::ViewMode::Review;
+                    app.review_scroll = 0;
+                    app.review_file_index = 0;
+                }
+            }
+        }
+        AppAction::LoadReviewDiff => {
+            if let Some(review) = &app.review {
+                let base = review.base_commit.clone();
+                let head = review.head_commit.clone();
+                // Attempt to resolve repo path from project -> workspace
+                let repo_path = resolve_review_repo_path(app, db);
+                if let Some(path) = repo_path {
+                    if let Ok(files) =
+                        ca_lib::git_ops::git_diff(std::path::Path::new(&path), &base, &head)
+                    {
+                        app.review_diff_files = files;
+                        app.review_file_index = 0;
+                        app.review_scroll = 0;
+                    }
+                }
+            }
+        }
+        AppAction::AddReviewComment {
+            review_id,
+            file_path,
+            line_number,
+            body,
+        } => {
+            if let Some(db) = db {
+                let _ = db.add_review_comment(review_id, "", &file_path, line_number, &body);
+                app.set_status("Comment added");
+            }
+        }
     }
+}
+
+fn resolve_review_repo_path(app: &App, db: Option<&Database>) -> Option<String> {
+    let review = app.review.as_ref()?;
+    let db = db?;
+    let project_id = review.project_id?;
+    let project = db.get_project(project_id).ok()??;
+    let workspace = db.get_workspace(project.workspace_id).ok()??;
+    Some(project.worktree_path.unwrap_or(workspace.path))
 }
 
 fn handle_form_submit(

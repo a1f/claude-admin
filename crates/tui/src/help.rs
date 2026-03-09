@@ -59,6 +59,15 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("b", "Back to Plan Detail", ""),
             ]);
         }
+        ViewMode::Review => {
+            entries.extend([
+                ("j / k", "Scroll diff up/down", ""),
+                ("n / p", "Next/previous hunk", ""),
+                ("h / l", "Previous/next file", ""),
+                ("c", "Add comment at line", ""),
+                ("b", "Back", ""),
+            ]);
+        }
     }
 
     entries
@@ -116,6 +125,7 @@ mod tests {
             ViewMode::Plans,
             ViewMode::PlanDetail,
             ViewMode::Orchestrator,
+            ViewMode::Review,
         ] {
             let content = help_content(mode);
             assert!(

@@ -6,6 +6,10 @@ const DEFAULT_SETTINGS: &[(&str, &str)] = &[
     ("poll_interval", "2"),
     ("max_sessions", "50"),
     ("notification_enabled", "true"),
+    (
+        "notification_rules",
+        r#"[{"to":"needs_input","enabled":true}]"#,
+    ),
 ];
 
 impl Database {
@@ -273,6 +277,7 @@ mod tests {
         db.delete_setting("poll_interval").unwrap();
         db.delete_setting("max_sessions").unwrap();
         db.delete_setting("notification_enabled").unwrap();
+        db.delete_setting("notification_rules").unwrap();
 
         let settings = db.list_settings().unwrap();
         assert!(settings.is_empty());
@@ -286,7 +291,7 @@ mod tests {
         db.set_setting("extra_b", "2").unwrap();
 
         let settings = db.list_settings().unwrap();
-        assert_eq!(settings.len(), 5);
+        assert_eq!(settings.len(), 6);
     }
 
     #[test]
@@ -296,6 +301,7 @@ mod tests {
         db.delete_setting("poll_interval").unwrap();
         db.delete_setting("max_sessions").unwrap();
         db.delete_setting("notification_enabled").unwrap();
+        db.delete_setting("notification_rules").unwrap();
 
         db.set_setting("zebra", "z").unwrap();
         db.set_setting("apple", "a").unwrap();
@@ -314,6 +320,7 @@ mod tests {
         db.delete_setting("poll_interval").unwrap();
         db.delete_setting("max_sessions").unwrap();
         db.delete_setting("notification_enabled").unwrap();
+        db.delete_setting("notification_rules").unwrap();
 
         db.set_setting("name", "alice").unwrap();
 
@@ -340,6 +347,7 @@ mod tests {
             db.get_setting("notification_enabled").unwrap(),
             Some("true".to_string())
         );
+        assert!(db.get_setting("notification_rules").unwrap().is_some());
     }
 
     #[test]
@@ -349,7 +357,7 @@ mod tests {
         db.ensure_defaults().unwrap();
 
         let settings = db.list_settings().unwrap();
-        assert_eq!(settings.len(), 3);
+        assert_eq!(settings.len(), 4);
 
         assert_eq!(
             db.get_setting("poll_interval").unwrap(),
@@ -393,7 +401,7 @@ mod tests {
         db.ensure_defaults().unwrap();
 
         let settings = db.list_settings().unwrap();
-        assert_eq!(settings.len(), 3);
+        assert_eq!(settings.len(), 4);
     }
 
     // -- Integration --
@@ -409,7 +417,7 @@ mod tests {
         assert_eq!(db.get_setting("lang").unwrap(), Some("fr".to_string()));
 
         let all = db.list_settings().unwrap();
-        assert_eq!(all.len(), 4);
+        assert_eq!(all.len(), 5);
         assert!(all.iter().any(|(k, v)| k == "lang" && v == "fr"));
 
         let deleted = db.delete_setting("lang").unwrap();
@@ -417,7 +425,7 @@ mod tests {
         assert!(db.get_setting("lang").unwrap().is_none());
 
         let all = db.list_settings().unwrap();
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 4);
     }
 
     #[test]
@@ -470,6 +478,7 @@ mod tests {
                 db.get_setting("notification_enabled").unwrap(),
                 Some("true".to_string())
             );
+            assert!(db.get_setting("notification_rules").unwrap().is_some());
         }
     }
 }

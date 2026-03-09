@@ -1,5 +1,10 @@
 use std::process::Command;
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::db::Database;
+use crate::models::SessionState;
 
 #[derive(Error, Debug)]
 pub enum NotifyError {
@@ -7,6 +12,74 @@ pub enum NotifyError {
     Io(#[from] std::io::Error),
     #[error("osascript failed: {0}")]
     CommandFailed(String),
+    #[error("database error: {0}")]
+    Db(#[from] crate::db::DbError),
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationRule {
+    #[serde(default)]
+    pub from: Option<SessionState>,
+    pub to: SessionState,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct NotificationConfig {
+    pub enabled: bool,
+    pub rules: Vec<NotificationRule>,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            rules: vec![NotificationRule {
+                from: None,
+                to: SessionState::NeedsInput,
+                enabled: true,
+            }],
+        }
+    }
+}
+
+impl NotificationConfig {
+    pub fn should_notify(&self, from: &SessionState, to: &SessionState) -> bool {
+        if !self.enabled {
+            return false;
+        }
+
+        self.rules.iter().any(|rule| {
+            rule.enabled && rule.to == *to && rule.from.as_ref().is_none_or(|f| f == from)
+        })
+    }
+
+    pub fn from_settings(db: &Database) -> Self {
+        let enabled = db
+            .get_setting("notification_enabled")
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(true);
+
+        let rules = db
+            .get_setting("notification_rules")
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::from_str::<Vec<NotificationRule>>(&v).ok())
+            .unwrap_or_else(|| Self::default().rules);
+
+        Self { enabled, rules }
+    }
+
+    pub fn save_to_settings(&self, db: &Database) -> Result<(), NotifyError> {
+        db.set_setting("notification_enabled", &self.enabled.to_string())?;
+        let rules_json = serde_json::to_string(&self.rules)?;
+        db.set_setting("notification_rules", &rules_json)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -201,5 +274,158 @@ mod tests {
 
         let script = args[1].to_string_lossy();
         assert!(script.starts_with("display notification"));
+    }
+
+    // -- NotificationConfig tests --
+
+    #[test]
+    fn default_config_notifies_on_needs_input() {
+        let config = NotificationConfig::default();
+        assert!(config.should_notify(&SessionState::Working, &SessionState::NeedsInput));
+    }
+
+    #[test]
+    fn default_config_does_not_notify_on_done() {
+        let config = NotificationConfig::default();
+        assert!(!config.should_notify(&SessionState::Working, &SessionState::Done));
+    }
+
+    #[test]
+    fn disabled_global_blocks_all() {
+        let config = NotificationConfig {
+            enabled: false,
+            ..NotificationConfig::default()
+        };
+        assert!(!config.should_notify(&SessionState::Working, &SessionState::NeedsInput));
+    }
+
+    #[test]
+    fn disabled_rule_does_not_trigger() {
+        let config = NotificationConfig {
+            enabled: true,
+            rules: vec![NotificationRule {
+                from: None,
+                to: SessionState::NeedsInput,
+                enabled: false,
+            }],
+        };
+        assert!(!config.should_notify(&SessionState::Working, &SessionState::NeedsInput));
+    }
+
+    #[test]
+    fn custom_rule_matches_from() {
+        let config = NotificationConfig {
+            enabled: true,
+            rules: vec![NotificationRule {
+                from: Some(SessionState::Working),
+                to: SessionState::Done,
+                enabled: true,
+            }],
+        };
+        assert!(config.should_notify(&SessionState::Working, &SessionState::Done));
+        assert!(!config.should_notify(&SessionState::Idle, &SessionState::Done));
+    }
+
+    #[test]
+    fn from_none_matches_any_source() {
+        let config = NotificationConfig {
+            enabled: true,
+            rules: vec![NotificationRule {
+                from: None,
+                to: SessionState::NeedsInput,
+                enabled: true,
+            }],
+        };
+        assert!(config.should_notify(&SessionState::Idle, &SessionState::NeedsInput));
+        assert!(config.should_notify(&SessionState::Working, &SessionState::NeedsInput));
+        assert!(config.should_notify(&SessionState::Done, &SessionState::NeedsInput));
+    }
+
+    #[test]
+    fn no_rules_means_no_notifications() {
+        let config = NotificationConfig {
+            enabled: true,
+            rules: vec![],
+        };
+        assert!(!config.should_notify(&SessionState::Working, &SessionState::NeedsInput));
+    }
+
+    #[test]
+    fn notification_rule_serde_roundtrip() {
+        let rule = NotificationRule {
+            from: Some(SessionState::Working),
+            to: SessionState::NeedsInput,
+            enabled: true,
+        };
+        let json = serde_json::to_string(&rule).unwrap();
+        let parsed: NotificationRule = serde_json::from_str(&json).unwrap();
+        assert_eq!(rule, parsed);
+    }
+
+    #[test]
+    fn notification_rule_serde_without_from() {
+        let rule = NotificationRule {
+            from: None,
+            to: SessionState::NeedsInput,
+            enabled: true,
+        };
+        let json = serde_json::to_string(&rule).unwrap();
+        let parsed: NotificationRule = serde_json::from_str(&json).unwrap();
+        assert_eq!(rule, parsed);
+    }
+
+    #[test]
+    fn config_from_settings_uses_defaults_on_fresh_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+
+        let config = NotificationConfig::from_settings(&db);
+        assert!(config.enabled);
+        assert_eq!(config.rules.len(), 1);
+        assert_eq!(config.rules[0].to, SessionState::NeedsInput);
+    }
+
+    #[test]
+    fn config_save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+
+        let config = NotificationConfig {
+            enabled: false,
+            rules: vec![
+                NotificationRule {
+                    from: None,
+                    to: SessionState::NeedsInput,
+                    enabled: true,
+                },
+                NotificationRule {
+                    from: Some(SessionState::Working),
+                    to: SessionState::Done,
+                    enabled: false,
+                },
+            ],
+        };
+
+        config.save_to_settings(&db).unwrap();
+
+        let loaded = NotificationConfig::from_settings(&db);
+        assert_eq!(loaded.enabled, config.enabled);
+        assert_eq!(loaded.rules, config.rules);
+    }
+
+    #[test]
+    fn config_from_settings_falls_back_on_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+
+        db.set_setting("notification_rules", "not valid json")
+            .unwrap();
+
+        let config = NotificationConfig::from_settings(&db);
+        assert_eq!(config.rules.len(), 1);
+        assert_eq!(config.rules[0].to, SessionState::NeedsInput);
     }
 }

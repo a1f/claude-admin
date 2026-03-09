@@ -275,42 +275,42 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
 ```
  #     | Step                          | Status  | Creates / Modifies                          | Validation                                    | Review Focus
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M4.1  | Git operations module         | Pending | C: crates/ca-lib/src/git_ops.rs              | cargo test -p ca-lib git_ops::tests           | Parse unified diff format
+ M4.1  | Git operations module         | Done | C: crates/ca-lib/src/git_ops.rs              | cargo test -p ca-lib git_ops::tests           | Parse unified diff format
        | (diff, log, show)             |         | M: crates/ca-lib/src/lib.rs (pub mod)        | >= 10 tests: parse_diff hunks correct,         | Structured DiffFile/DiffHunk/DiffLine
        |                               |         |                                             |   added/removed/context lines, binary file     | git diff --no-color for parsing
        |                               |         |                                             |   handling, empty diff, git log parsing,       | git log --format for structured output
        |                               |         |                                             |   commit_show, file rename detection          | Handle non-git dirs gracefully
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M4.2  | Reviews + review_comments     | Pending | C: crates/ca-lib/src/review.rs               | cargo test -p ca-lib review::tests            | FK to sessions + projects
+ M4.2  | Reviews + review_comments     | Done | C: crates/ca-lib/src/review.rs               | cargo test -p ca-lib review::tests            | FK to sessions + projects
        | tables + CRUD                 |         | M: crates/ca-lib/src/db.rs (schema)          | >= 12 tests: create review, add comments,      | ReviewStatus: pending, in_progress,
        |                               |         | M: crates/ca-lib/src/lib.rs (pub mod)        |   list by project, list by session,            |   approved, changes_requested
        |                               |         |                                             |   resolve comment, delete review cascade,     | review_comments: file, line, body,
        |                               |         |                                             |   update status, get with comments             |   resolved bool
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M4.3  | TUI review mode               | Pending | C: crates/tui/src/review_view.rs             | cargo test -p tui review_view::tests          | ViewMode::Review added
+ M4.3  | TUI review mode               | Done | C: crates/tui/src/review_view.rs             | cargo test -p tui review_view::tests          | ViewMode::Review added
        | (commit list, diff viewer,    |         | M: crates/tui/src/app.rs (ViewMode, state)   | >= 8 tests: commit list renders,               | Scrollable diff with line numbers
        |  inline comments)             |         | M: crates/tui/src/ui.rs (route view)         |   diff scroll works, add comment on line,     | Left panel: commit list
        |                               |         | M: crates/tui/src/help.rs (review keys)      |   navigate hunks with n/p,                     | Right panel: diff viewer
        |                               |         |                                             |   j/k scroll, Enter on commit shows diff      | c adds comment at cursor line
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M4.4  | External diff integration     | Pending | M: crates/tui/src/review_view.rs             | cargo test -p tui                             | v opens vimdiff for selected file
+ M4.4  | External diff integration     | Done | M: crates/tui/src/review_view.rs             | cargo test -p tui                             | v opens vimdiff for selected file
        | (vimdiff, delta)              |         | M: crates/tui/src/app.rs (actions)           | >= 4 tests: v returns VimdiffAction,           | d opens delta for selected file
        |                               |         | M: crates/tui/src/main.rs (handle action)    |   d returns DeltaAction, missing tool          | Restore terminal before exec
        |                               |         |                                             |   → error message, correct args passed        | Re-enter alternate screen after return
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M4.5  | Review submission             | Pending | M: crates/ca-lib/src/review.rs (format)      | cargo test -p ca-lib review::tests            | Format comments as markdown text
+ M4.5  | Review submission             | Done | M: crates/ca-lib/src/review.rs (format)      | cargo test -p ca-lib review::tests            | Format comments as markdown text
        | (send feedback to Claude)     |         | M: crates/tui/src/review_view.rs (submit)    | >= 6 tests: format_review_feedback             | tmux send-keys to session pane
        |                               |         | M: crates/tui/src/main.rs (handle action)    |   produces correct markdown, empty review      | Group comments by file
        |                               |         |                                             |   → no-op, send-keys escapes special chars,   | Include file:line references
        |                               |         |                                             |   review status updated after submit          |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M4.6  | Review lifecycle              | Pending | M: crates/daemon/src/polling.rs (detect)     | cargo test -p daemon                          | Session DONE → prompt for review
+ M4.6  | Review lifecycle              | Done | M: crates/daemon/src/polling.rs (detect)     | cargo test -p daemon                          | Session DONE → prompt for review
        | (ready → review → feedback    |         | M: crates/tui/src/app.rs (review prompts)    | >= 6 tests: session done triggers review       | Notification: "Session X ready for review"
        |  → iterate)                   |         | M: crates/ca-lib/src/notify.rs (review notif)|   prompt, review submitted → iterate,         | Review round counter
        |                               |         |                                             |   multiple rounds tracked, review status       | Status flow: pending→in_progress→
        |                               |         |                                             |   transitions valid                            |   approved/changes_requested
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M4.7  | ca review --html              | Pending | C: crates/cli/src/review_html.rs             | cargo test -p cli review_html::tests          | Standalone HTML file (no server)
+ M4.7  | ca review --html              | Done | C: crates/cli/src/review_html.rs             | cargo test -p cli review_html::tests          | Standalone HTML file (no server)
        | (standalone HTML diff export) |         | M: crates/cli/src/main.rs (review subcommand)| >= 4 tests: HTML output valid structure,       | Inline CSS for syntax highlighting
        |                               |         |                                             |   comments embedded, opens in browser,        | Include review comments inline
        |                               |         |                                             |   missing review → error                      | open command (macOS) to launch browser
@@ -412,7 +412,7 @@ M2.1 -> M2.2 -> M2.3 -> M2.4 -> M2.5 -> M2.6 -> M2.7 -> M2.8 -> M2.9 -> M2.10
                                                     (M2 complete ✓)
 M3.1 -> M3.2 -> M3.3 -> M3.4 -> M3.5 -> M3.6
                                                     (M3 complete ✓)
-M4.1 -> M4.2 -> M4.3 -> M4.4 -> M4.5 -> M4.6 -> M4.7
+M4.1 -> M4.2 -> M4.3 -> M4.4 -> M4.5 -> M4.6 -> M4.7  (M4 complete ✓)
 M5.1 -> M5.2 -> M5.3 -> M5.4 -> M5.5
 M6.1 -> M6.2 -> M6.3 -> M6.4 -> M6.5
 ```

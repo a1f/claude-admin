@@ -31,6 +31,7 @@ pub enum OrchPanel {
     Sessions,
 }
 
+#[derive(Debug)]
 pub enum AppAction {
     None,
     Quit,
@@ -50,7 +51,6 @@ pub enum AppAction {
     AttachSession(String),
     ExecuteCommand(String),
     SubmitForm,
-    #[allow(dead_code)]
     CreateWorkspace {
         path: String,
         name: Option<String>,
@@ -66,14 +66,12 @@ pub enum AppAction {
         project_id: i64,
         name: String,
     },
-    #[allow(dead_code)]
     DeleteWorkspace(i64),
-    #[allow(dead_code)]
     DeleteProject(i64),
-    #[allow(dead_code)]
     DeletePlan(i64),
-    #[allow(dead_code)]
     OpenForm(FormKind),
+    LoadWorkspaces,
+    ShowHelp,
 }
 
 pub struct App {

@@ -1,12 +1,13 @@
 mod app;
 mod command_palette;
+mod commands;
 mod form;
 mod input;
 mod plan_view;
 mod project_view;
 mod ui;
 
-use app::{App, AppAction};
+use app::{App, AppAction, InputMode};
 use ca_lib::db::Database;
 use ca_lib::ipc::{IpcClient, Request, Response};
 use ca_lib::plan::PlanContent;
@@ -166,9 +167,14 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 .args(["select-pane", "-t", &pane_id])
                 .output();
         }
-        AppAction::ExecuteCommand(_cmd) => {
-            // Command execution will be wired in M2.5 (command parser)
-        }
+        AppAction::ExecuteCommand(cmd) => match commands::parse_command(&cmd) {
+            Ok(action) => {
+                handle_action(action, app, db);
+            }
+            Err(msg) => {
+                app.command_palette.message = Some(msg);
+            }
+        },
         AppAction::SubmitForm => {
             if let Some(form) = app.form_overlay.take() {
                 let values = form.field_values();
@@ -235,6 +241,16 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                     }
                 }
             }
+        }
+        AppAction::LoadWorkspaces => {
+            if let Some(db) = db {
+                if let Ok(workspaces) = db.list_workspaces() {
+                    app.update_workspaces(workspaces);
+                }
+            }
+        }
+        AppAction::ShowHelp => {
+            app.input_mode = InputMode::Help;
         }
     }
 }

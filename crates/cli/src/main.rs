@@ -1,3 +1,5 @@
+mod review_html;
+
 use std::path::PathBuf;
 
 use ca_lib::db::{Database, DbError};
@@ -109,6 +111,11 @@ pub enum Command {
         #[arg(long)]
         auto: bool,
     },
+    /// Code review operations
+    Review {
+        #[command(subcommand)]
+        command: ReviewCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -191,6 +198,29 @@ pub enum HooksCommand {
     Status,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum ReviewCommand {
+    /// List reviews
+    List {
+        #[arg(long)]
+        project_id: Option<i64>,
+        #[arg(long)]
+        session_id: Option<String>,
+    },
+    /// Show review details
+    Show { review_id: i64 },
+    /// Export review as HTML
+    Html {
+        review_id: i64,
+        /// Output file path (default: review-{id}.html)
+        #[arg(long, short)]
+        output: Option<String>,
+        /// Open in browser after generating
+        #[arg(long)]
+        open: bool,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -224,6 +254,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             max,
             auto,
         } => handle_batch(plan_id, steps.as_deref(), max, auto),
+        Command::Review { command } => handle_review(command),
     }
 }
 
@@ -542,6 +573,75 @@ fn handle_plan(command: PlanCommand) -> Result<(), CliError> {
                 println!("Deleted plan {id}.");
             } else {
                 println!("Plan {id} not found.");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn handle_review(command: ReviewCommand) -> Result<(), CliError> {
+    let db = open_db()?;
+    match command {
+        ReviewCommand::List {
+            project_id,
+            session_id,
+        } => {
+            let reviews = if let Some(pid) = project_id {
+                db.list_reviews_by_project(pid)?
+            } else if let Some(sid) = &session_id {
+                db.list_reviews_by_session(sid)?
+            } else {
+                Vec::new()
+            };
+            if reviews.is_empty() {
+                println!("No reviews found.");
+            } else {
+                for r in &reviews {
+                    println!(
+                        "#{} branch:{} status:{} round:{}",
+                        r.id, r.branch, r.status, r.round
+                    );
+                }
+            }
+            Ok(())
+        }
+        ReviewCommand::Show { review_id } => {
+            let review = db
+                .get_review(review_id)?
+                .ok_or_else(|| CliError::NotFound(format!("Review {review_id}")))?;
+            let comments = db.get_review_comments(review_id)?;
+            println!("Review #{}", review.id);
+            println!("  Branch: {}", review.branch);
+            println!("  Commits: {}..{}", review.base_commit, review.head_commit);
+            println!("  Status: {}", review.status);
+            println!("  Round: {}", review.round);
+            println!("  Comments: {}", comments.len());
+            for c in &comments {
+                println!("    {}:{} - {}", c.file_path, c.line_number, c.body);
+            }
+            Ok(())
+        }
+        ReviewCommand::Html {
+            review_id,
+            output,
+            open,
+        } => {
+            let review = db
+                .get_review(review_id)?
+                .ok_or_else(|| CliError::NotFound(format!("Review {review_id}")))?;
+            let comments = db.get_review_comments(review_id)?;
+
+            let diff_files = review_html::resolve_repo_path(&db, &review)
+                .map(|repo| review_html::fetch_diff_files(&repo, &review))
+                .unwrap_or_default();
+
+            let html = review_html::generate_review_html(&review, &diff_files, &comments);
+            let out_path = output.unwrap_or_else(|| format!("review-{review_id}.html"));
+            std::fs::write(&out_path, &html)?;
+            println!("Written to {out_path}");
+
+            if open {
+                let _ = std::process::Command::new("open").arg(&out_path).status();
             }
             Ok(())
         }
@@ -1420,6 +1520,86 @@ mod tests {
                 assert!(auto);
             }
             _ => panic!("expected Batch command"),
+        }
+    }
+
+    // -- Group 6d: Review CLI parsing --
+
+    #[test]
+    fn test_clap_review_list_parses() {
+        let cli = Cli::parse_from(["claude-admin", "review", "list", "--project-id", "3"]);
+        match cli.command {
+            Command::Review { command } => match command {
+                ReviewCommand::List {
+                    project_id,
+                    session_id,
+                } => {
+                    assert_eq!(project_id, Some(3));
+                    assert!(session_id.is_none());
+                }
+                _ => panic!("expected List"),
+            },
+            _ => panic!("expected Review command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_review_show_parses() {
+        let cli = Cli::parse_from(["claude-admin", "review", "show", "7"]);
+        match cli.command {
+            Command::Review { command } => match command {
+                ReviewCommand::Show { review_id } => assert_eq!(review_id, 7),
+                _ => panic!("expected Show"),
+            },
+            _ => panic!("expected Review command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_review_html_parses() {
+        let cli = Cli::parse_from([
+            "claude-admin",
+            "review",
+            "html",
+            "5",
+            "--output",
+            "out.html",
+            "--open",
+        ]);
+        match cli.command {
+            Command::Review { command } => match command {
+                ReviewCommand::Html {
+                    review_id,
+                    output,
+                    open,
+                } => {
+                    assert_eq!(review_id, 5);
+                    assert_eq!(output, Some("out.html".to_string()));
+                    assert!(open);
+                }
+                _ => panic!("expected Html"),
+            },
+            _ => panic!("expected Review command"),
+        }
+    }
+
+    #[test]
+    fn test_clap_review_html_defaults() {
+        let cli = Cli::parse_from(["claude-admin", "review", "html", "10"]);
+        match cli.command {
+            Command::Review { command } => match command {
+                ReviewCommand::Html {
+                    review_id,
+                    output,
+                    open,
+                } => {
+                    assert_eq!(review_id, 10);
+                    assert!(output.is_none());
+                    assert!(!open);
+                }
+                _ => panic!("expected Html"),
+            },
+            _ => panic!("expected Review command"),
         }
     }
 

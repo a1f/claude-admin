@@ -157,66 +157,66 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
 
 ---
 
-## M2: TUI Interactivity & CRUD  ← CURRENT
+## M2: TUI Interactivity & CRUD  ✓
 
 ```
  #     | Step                          | Status  | Creates / Modifies                          | Validation                                    | Review Focus
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.1  | InputMode enum + TextInput    | Pending | C: crates/tui/src/input.rs                  | cargo test -p tui input::tests                | q/Esc only fires in Normal mode
+ M2.1  | InputMode enum + TextInput    | Done | C: crates/tui/src/input.rs                  | cargo test -p tui input::tests                | q/Esc only fires in Normal mode
        | widget                        |         | M: crates/tui/src/app.rs (InputMode enum)   | >= 10 tests: insert_char, delete_char,        | Esc in non-Normal → back to Normal
        |                               |         | M: crates/tui/src/main.rs (gate keys)       |   backspace, cursor bounds, move_home/end,    | cursor_pos never exceeds value.len()
        |                               |         |                                             |   clear, InputMode gating (q in Normal        |
        |                               |         |                                             |   quits, q in Command doesn't, Esc in         |
        |                               |         |                                             |   Command → Normal)                           |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.2  | Command palette shell         | Pending | C: crates/tui/src/command_palette.rs         | cargo test -p tui command_palette::tests      | : opens palette, Esc closes
+ M2.2  | Command palette shell         | Done | C: crates/tui/src/command_palette.rs         | cargo test -p tui command_palette::tests      | : opens palette, Esc closes
        |                               |         | M: crates/tui/src/app.rs (palette state)     | >= 6 tests: : opens, typing accumulates,      | Keys route to palette when active
        |                               |         | M: crates/tui/src/ui.rs (render bar)         |   Enter → ExecuteCommand, Esc → Normal,       | Bottom bar Constraint::Length(1)
        |                               |         | M: crates/tui/src/main.rs (route keys)       |   backspace deletes, empty Enter is no-op     | ExecuteCommand echoes as message
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.3  | Form overlay framework        | Pending | C: crates/tui/src/form.rs                    | cargo test -p tui form::tests                 | Tab/Shift+Tab cycle fields
+ M2.3  | Form overlay framework        | Done | C: crates/tui/src/form.rs                    | cargo test -p tui form::tests                 | Tab/Shift+Tab cycle fields
        |                               |         | M: crates/tui/src/app.rs (form_overlay)      | >= 8 tests: correct fields per FormKind,      | Submit with empty required → error
        |                               |         | M: crates/tui/src/ui.rs (render overlay)     |   Tab cycles focus, Shift+Tab reverse,        | Centered overlay 60%×50%
        |                               |         | M: crates/tui/src/main.rs (route keys)       |   submit empty required → error,              | Focused field highlighted
        |                               |         |                                             |   submit valid → SubmitForm action,           |
        |                               |         |                                             |   Esc cancels + returns Normal                |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.4  | Wire forms to DB (CRUD)       | Pending | M: crates/tui/src/app.rs (new actions)       | cargo test -p tui                             | SubmitForm extracts form data
+ M2.4  | Wire forms to DB (CRUD)       | Done | M: crates/tui/src/app.rs (new actions)       | cargo test -p tui                             | SubmitForm extracts form data
        |                               |         | M: crates/tui/src/main.rs (handle actions)   | >= 6 tests: SubmitForm → Create action,       | Delete calls db.delete_*() + refresh
        |                               |         | M: crates/tui/src/form.rs (extract data)     |   OpenForm sets input_mode + overlay,         | Create calls db.create_*() + refresh
        |                               |         |                                             |   delete workspace/project/plan actions       | Existing db methods reused
        |                               |         |                                             | Manual: TUI form → DB row created             |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.5  | Command parser                | Pending | C: crates/tui/src/commands.rs                | cargo test -p tui commands::tests             | parse_command returns Result
+ M2.5  | Command parser                | Done | C: crates/tui/src/commands.rs                | cargo test -p tui commands::tests             | parse_command returns Result
        |                               |         | M: crates/tui/src/main.rs (wire Execute)     | >= 12 tests: "ws add /path name" → Create,    | Error messages shown in palette
        |                               |         | M: crates/tui/src/app.rs (new actions)       |   "ws list" → LoadWorkspaces,                 | ws add/del, proj new/del,
        |                               |         |                                             |   "ws del 1" → Delete, "proj new" → Form,    |   plan del, help
        |                               |         |                                             |   "help" → Help, unknown → Err,              | Simple cmds inline, complex open forms
        |                               |         |                                             |   missing args → Err, extra args → Ok         |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.6  | Command palette autocomplete  | Pending | M: crates/tui/src/command_palette.rs         | cargo test -p tui command_palette::tests      | Prefix matching on static list
+ M2.6  | Command palette autocomplete  | Done | M: crates/tui/src/command_palette.rs         | cargo test -p tui command_palette::tests      | Prefix matching on static list
        |                               |         | M: crates/tui/src/ui.rs (suggestion popup)   | >= 6 tests: prefix match, Tab accepts top,    | Tab accepts top suggestion
        |                               |         |                                             |   Up/Down cycle, empty shows all,             | Up/Down cycle suggestions
        |                               |         |                                             |   no match → empty list,                      | Popup above command bar
        |                               |         |                                             |   selection wraps around                      |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.7  | Help overlay                  | Pending | C: crates/tui/src/help.rs                    | cargo test -p tui help::tests                 | ? toggles help overlay
+ M2.7  | Help overlay                  | Done | C: crates/tui/src/help.rs                    | cargo test -p tui help::tests                 | ? toggles help overlay
        |                               |         | M: crates/tui/src/app.rs (help state)        | >= 5 tests: help_content non-empty for all    | 3-col table: Key, Action, CLI Cmd
        |                               |         | M: crates/tui/src/ui.rs (render overlay)     |   ViewModes, ? toggles InputMode::Help,       | Centered 70%×80% overlay
        |                               |         | M: crates/tui/src/main.rs (route keys)       |   Esc returns Normal, ? in Help → Normal      | Esc or ? closes
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.8  | Inline CRUD keybindings       | Pending | M: crates/tui/src/app.rs (per-view keys)     | cargo test -p tui                             | n → OpenForm per view context
+ M2.8  | Inline CRUD keybindings       | Done | M: crates/tui/src/app.rs (per-view keys)     | cargo test -p tui                             | n → OpenForm per view context
        |                               |         | M: crates/tui/src/plan_view.rs               | >= 8 tests: n → OpenForm(correct kind),       | d → delete with y/n confirmation
        |                               |         | M: crates/tui/src/ui.rs (key hints in title) |   d → Delete for selected, d on empty → noop,| N → OpenForm(CreateWorkspace)
        |                               |         |                                             |   N → CreateWorkspace from any view,          | Key hints in view titles
        |                               |         |                                             |   delete confirm y executes, n cancels        | Keys ignored on empty lists
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.9  | Session import / assign       | Pending | M: crates/tui/src/app.rs (untracked + picker)| cargo test -p tui                             | i toggles untracked filter
+ M2.9  | Session import / assign       | Done | M: crates/tui/src/app.rs (untracked + picker)| cargo test -p tui                             | i toggles untracked filter
        |                               |         | M: crates/tui/src/ui.rs (picker popup)       | >= 6 tests: toggle filter, assign action,     | p opens project picker popup
        |                               |         | M: crates/tui/src/main.rs (handle assign)    |   picker navigation, assign sets project_id,  | Enter assigns selected project
        |                               |         |                                             |   filtered list correct, Esc closes picker    | db.update_session() called
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M2.10 | Status bar and feedback       | Pending | M: crates/tui/src/app.rs (status_message)    | cargo test -p tui                             | Status clears after 5s
+ M2.10 | Status bar and feedback       | Done | M: crates/tui/src/app.rs (status_message)    | cargo test -p tui                             | Status clears after 5s
        |                               |         | M: crates/tui/src/ui.rs (bottom bar)         | >= 4 tests: set_status stores, renders,       | Left=key hints, right=status msg
        |                               |         | M: crates/tui/src/plan_view.rs               |   clears after timeout, command palette       | Command palette replaces bar
        |                               |         | M: crates/tui/src/project_view.rs            |   replaces bar when active                    | All CRUD ops call set_status
@@ -235,7 +235,7 @@ M0.1 -> M0.2 -> M0.3 -> M0.4 -> M0.5 -> M0.6 -> M0.7 -> M0.8 -> M0.9 -> M0.10
 M1.1 -> M1.2 -> M1.3 -> M1.4 -> M1.12 -> M1.5 -> M1.6 -> M1.7 -> M1.11 -> M1.8 -> M1.9 -> M1.10
                                                     (M1 complete ✓)
 M2.1 -> M2.2 -> M2.3 -> M2.4 -> M2.5 -> M2.6 -> M2.7 -> M2.8 -> M2.9 -> M2.10
-                                                    (M2 current)
+                                                    (M2 complete ✓)
 ```
 
-32 steps. M0 (10 done) + M1 (12 done) + M2 (10 pending).
+32 steps. M0 (10 done) + M1 (12 done) + M2 (10 done). All complete.

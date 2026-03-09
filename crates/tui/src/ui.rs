@@ -88,10 +88,17 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     let visible = app.visible_sessions();
     let items: Vec<ListItem> = visible
         .iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(i, s)| {
+            let pos = if i < 9 {
+                format!("{} ", i + 1)
+            } else {
+                "  ".to_string()
+            };
             let indicator = state_indicator(&s.state);
             let color = state_color(&s.state);
             let content = Line::from(vec![
+                Span::styled(pos, Style::default().fg(Color::DarkGray)),
                 Span::styled(indicator, Style::default().fg(color)),
                 Span::raw(&s.id),
                 Span::raw("  "),

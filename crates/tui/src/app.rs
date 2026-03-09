@@ -1,7 +1,7 @@
 use crate::command_palette::CommandPalette;
 use crate::form::{FormKind, FormOverlay};
 use ca_lib::events::Event;
-use ca_lib::models::Session;
+use ca_lib::models::{Session, SessionState};
 use ca_lib::plan::{Plan, Step, StepStatus};
 use ca_lib::project::Project;
 use ca_lib::workspace::Workspace;
@@ -478,6 +478,24 @@ impl App {
         }
     }
 
+    pub fn next_needs_input(&mut self) -> AppAction {
+        let visible = self.visible_sessions();
+        if visible.is_empty() {
+            return AppAction::None;
+        }
+        let count = visible.len();
+        for i in 1..=count {
+            let idx = (self.selected_index + i) % count;
+            if visible[idx].state == SessionState::NeedsInput {
+                let id = visible[idx].id.clone();
+                self.selected_index = idx;
+                self.preview_events.clear();
+                return AppAction::SelectSession(id);
+            }
+        }
+        AppAction::None
+    }
+
     fn handle_sessions_key(&mut self, code: KeyCode) -> AppAction {
         match code {
             KeyCode::Char('j') | KeyCode::Down => {
@@ -488,6 +506,19 @@ impl App {
                 self.select_prev();
                 AppAction::None
             }
+            KeyCode::Char(c @ '1'..='9') => {
+                let idx = (c as usize) - ('1' as usize);
+                let count = self.visible_sessions().len();
+                if idx < count {
+                    self.selected_index = idx;
+                    self.preview_events.clear();
+                    if let Some(session) = self.visible_sessions().get(idx) {
+                        return AppAction::SelectSession(session.id.clone());
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Tab | KeyCode::Char('n') => self.next_needs_input(),
             KeyCode::Enter => {
                 if let Some(session) = self.selected_session() {
                     AppAction::SelectSession(session.id.clone())
@@ -2200,5 +2231,160 @@ mod tests {
         app.status_message = Some(("Old".to_string(), Instant::now() - Duration::from_secs(6)));
         app.clear_stale_status();
         assert!(app.status_message.is_none());
+    }
+
+    // -- Quick-switch tests (M3.4) --
+
+    fn make_session_with_state(id: &str, state: SessionState) -> Session {
+        Session {
+            id: id.to_string(),
+            pane_id: format!("%{id}"),
+            session_name: "main".to_string(),
+            window_index: 0,
+            pane_index: 0,
+            working_dir: "/home/user".to_string(),
+            state,
+            detection_method: "process_name".to_string(),
+            last_activity: 0,
+            created_at: 0,
+            updated_at: 0,
+            project_id: None,
+            plan_step_id: None,
+        }
+    }
+
+    #[test]
+    fn test_number_key_selects_session() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session("s1"),
+            make_session("s2"),
+            make_session("s3"),
+        ]);
+        let action = app.handle_key(key(KeyCode::Char('1')));
+        assert_eq!(app.selected_index, 0);
+        match action {
+            AppAction::SelectSession(id) => assert_eq!(id, "s1"),
+            _ => panic!("expected SelectSession, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_number_key_out_of_range_ignored() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session("s1"),
+            make_session("s2"),
+            make_session("s3"),
+        ]);
+        app.selected_index = 1;
+        let action = app.handle_key(key(KeyCode::Char('5')));
+        assert_eq!(app.selected_index, 1);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_tab_jumps_to_needs_input() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session_with_state("s1", SessionState::Working),
+            make_session_with_state("s2", SessionState::NeedsInput),
+            make_session_with_state("s3", SessionState::Working),
+        ]);
+        app.selected_index = 0;
+        let action = app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.selected_index, 1);
+        match action {
+            AppAction::SelectSession(id) => assert_eq!(id, "s2"),
+            _ => panic!("expected SelectSession, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_tab_wraps_around() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session_with_state("s1", SessionState::NeedsInput),
+            make_session_with_state("s2", SessionState::Working),
+            make_session_with_state("s3", SessionState::Working),
+        ]);
+        // Start at index 1 so wrapping is needed to find s1 at index 0
+        app.selected_index = 1;
+        let action = app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.selected_index, 0);
+        match action {
+            AppAction::SelectSession(id) => assert_eq!(id, "s1"),
+            _ => panic!("expected SelectSession, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_tab_no_needs_input_is_noop() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session_with_state("s1", SessionState::Working),
+            make_session_with_state("s2", SessionState::Working),
+            make_session_with_state("s3", SessionState::Done),
+        ]);
+        app.selected_index = 0;
+        let action = app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.selected_index, 0);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_n_key_same_as_tab() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session_with_state("s1", SessionState::Working),
+            make_session_with_state("s2", SessionState::NeedsInput),
+            make_session_with_state("s3", SessionState::Done),
+        ]);
+        app.selected_index = 0;
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.selected_index, 1);
+        match action {
+            AppAction::SelectSession(id) => assert_eq!(id, "s2"),
+            _ => panic!("expected SelectSession, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_tab_skips_non_needs_input() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session_with_state("s1", SessionState::Working),
+            make_session_with_state("s2", SessionState::Done),
+            make_session_with_state("s3", SessionState::NeedsInput),
+            make_session_with_state("s4", SessionState::Working),
+        ]);
+        app.selected_index = 0;
+        let action = app.handle_key(key(KeyCode::Tab));
+        // Should skip s2 (Done) and land on s3 (NeedsInput)
+        assert_eq!(app.selected_index, 2);
+        match action {
+            AppAction::SelectSession(id) => assert_eq!(id, "s3"),
+            _ => panic!("expected SelectSession, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_number_keys_in_non_sessions_view_ignored() {
+        for mode in [
+            ViewMode::Projects,
+            ViewMode::Plans,
+            ViewMode::PlanDetail,
+            ViewMode::Orchestrator,
+        ] {
+            let mut app = App::new();
+            app.view_mode = mode;
+            app.update_sessions(vec![make_session("s1"), make_session("s2")]);
+            let action = app.handle_key(key(KeyCode::Char('1')));
+            assert!(
+                !matches!(action, AppAction::SelectSession(_)),
+                "number key should not select session in {:?}",
+                mode
+            );
+        }
     }
 }

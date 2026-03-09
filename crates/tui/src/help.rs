@@ -15,6 +15,8 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
         ViewMode::Sessions => {
             entries.extend([
                 ("Enter", "Select session (preview)", ""),
+                ("1-9", "Quick-switch to session", ""),
+                ("Tab / n", "Next needs-input session", ""),
                 ("p", "Switch to Projects view", "ca project list"),
                 ("i", "Toggle untracked filter", ""),
                 ("N", "Create workspace", "ca workspace add <path>"),

@@ -5,6 +5,7 @@ use crate::plan_view;
 use crate::project_view;
 use ca_lib::events::EventType;
 use ca_lib::models::SessionState;
+use ca_lib::project::Project;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -63,8 +64,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
-    if app.sessions.is_empty() {
-        let msg = if app.connected {
+    let visible = app.visible_sessions();
+    if visible.is_empty() {
+        let msg = if app.show_untracked {
+            "No untracked sessions. Press 'i' to show all."
+        } else if app.connected {
             "No sessions found. Waiting for data..."
         } else {
             "Not connected to daemon. Is it running? (claude-admin daemon start)"
@@ -85,11 +89,15 @@ fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
 
     draw_session_list(frame, app, chunks[0]);
     draw_preview(frame, app, chunks[1]);
+
+    if let Some(projects) = &app.project_picker {
+        draw_project_picker(frame, projects, app.picker_index, area);
+    }
 }
 
 fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .sessions
+    let visible = app.visible_sessions();
+    let items: Vec<ListItem> = visible
         .iter()
         .map(|s| {
             let indicator = state_indicator(&s.state);
@@ -106,12 +114,14 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let title = if app.show_untracked {
+        " Sessions [untracked] (i:all p:assign N:new-ws ?:help) "
+    } else {
+        " Sessions (p:projects i:untracked N:new-ws ?:help) "
+    };
+
     let list = List::new(items)
-        .block(
-            Block::default()
-                .title(" Sessions (p:projects N:new-ws ?:help) ")
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title(title).borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 
@@ -407,4 +417,33 @@ fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     .row_highlight_style(Style::default());
 
     frame.render_widget(table, inner);
+}
+
+fn draw_project_picker(frame: &mut Frame, projects: &[Project], selected: usize, area: Rect) {
+    let height = (projects.len() as u16 + 2).min(12);
+    let width = 40u16.min(area.width);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = projects
+        .iter()
+        .map(|p| ListItem::new(p.name.as_str()))
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(" Assign to Project (Enter/Esc) ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_symbol(">> ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(selected));
+    frame.render_stateful_widget(list, popup, &mut list_state);
 }

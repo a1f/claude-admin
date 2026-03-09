@@ -253,6 +253,18 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         AppAction::ShowHelp => {
             app.input_mode = InputMode::Help;
         }
+        AppAction::ToggleUntracked => {}
+        AppAction::AssignSessionToProject {
+            session_id,
+            project_id,
+        } => {
+            if let Some(db) = db {
+                if let Ok(Some(mut session)) = db.get_session(&session_id) {
+                    session.project_id = Some(project_id);
+                    let _ = db.update_session(&session);
+                }
+            }
+        }
     }
 }
 

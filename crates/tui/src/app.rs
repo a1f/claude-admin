@@ -71,6 +71,11 @@ pub enum AppAction {
     OpenForm(FormKind),
     LoadWorkspaces,
     ShowHelp,
+    ToggleUntracked,
+    AssignSessionToProject {
+        session_id: String,
+        project_id: i64,
+    },
 }
 
 pub struct App {
@@ -94,6 +99,9 @@ pub struct App {
     pub command_palette: CommandPalette,
     pub form_overlay: Option<FormOverlay>,
     pub confirm_action: Option<Box<AppAction>>,
+    pub show_untracked: bool,
+    pub project_picker: Option<Vec<Project>>,
+    pub picker_index: usize,
 }
 
 impl App {
@@ -119,6 +127,9 @@ impl App {
             command_palette: CommandPalette::new(),
             form_overlay: None,
             confirm_action: None,
+            show_untracked: false,
+            project_picker: None,
+            picker_index: 0,
         }
     }
 
@@ -194,20 +205,33 @@ impl App {
         Some((&phase.name, &phase.steps[si]))
     }
 
+    pub fn visible_sessions(&self) -> Vec<&Session> {
+        if self.show_untracked {
+            self.sessions
+                .iter()
+                .filter(|s| s.project_id.is_none())
+                .collect()
+        } else {
+            self.sessions.iter().collect()
+        }
+    }
+
     pub fn select_next(&mut self) {
-        if self.sessions.is_empty() {
+        let count = self.visible_sessions().len();
+        if count == 0 {
             return;
         }
-        self.selected_index = (self.selected_index + 1) % self.sessions.len();
+        self.selected_index = (self.selected_index + 1) % count;
         self.preview_events.clear();
     }
 
     pub fn select_prev(&mut self) {
-        if self.sessions.is_empty() {
+        let count = self.visible_sessions().len();
+        if count == 0 {
             return;
         }
         if self.selected_index == 0 {
-            self.selected_index = self.sessions.len() - 1;
+            self.selected_index = count - 1;
         } else {
             self.selected_index -= 1;
         }
@@ -215,7 +239,7 @@ impl App {
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
-        self.sessions.get(self.selected_index)
+        self.visible_sessions().get(self.selected_index).copied()
     }
 
     /// Returns sessions linked to the current plan's project.
@@ -263,6 +287,10 @@ impl App {
                     AppAction::None
                 }
             };
+        }
+
+        if self.project_picker.is_some() {
+            return self.handle_picker_key(key);
         }
 
         match key.code {
@@ -452,11 +480,73 @@ impl App {
                     AppAction::None
                 }
             }
+            KeyCode::Char('i') => {
+                self.show_untracked = !self.show_untracked;
+                self.selected_index = 0;
+                AppAction::ToggleUntracked
+            }
             KeyCode::Char('p') => {
-                self.view_mode = ViewMode::Projects;
-                AppAction::LoadProjects
+                if self.show_untracked && self.selected_session().is_some() {
+                    self.project_picker = Some(self.projects.clone());
+                    self.picker_index = 0;
+                    AppAction::LoadProjects
+                } else {
+                    self.view_mode = ViewMode::Projects;
+                    AppAction::LoadProjects
+                }
             }
             KeyCode::Char('N') => AppAction::OpenForm(FormKind::CreateWorkspace),
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_picker_key(&mut self, key: KeyEvent) -> AppAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.project_picker = None;
+                AppAction::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(projects) = &self.project_picker {
+                    if !projects.is_empty() {
+                        self.picker_index = (self.picker_index + 1) % projects.len();
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(projects) = &self.project_picker {
+                    if !projects.is_empty() {
+                        if self.picker_index == 0 {
+                            self.picker_index = projects.len() - 1;
+                        } else {
+                            self.picker_index -= 1;
+                        }
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                let session_id = self
+                    .visible_sessions()
+                    .get(self.selected_index)
+                    .map(|s| s.id.clone());
+                let project_id = self
+                    .project_picker
+                    .as_ref()
+                    .and_then(|projects| projects.get(self.picker_index))
+                    .map(|p| p.id);
+                self.project_picker = None;
+
+                if let (Some(sid), Some(pid)) = (session_id, project_id) {
+                    AppAction::AssignSessionToProject {
+                        session_id: sid,
+                        project_id: pid,
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
             _ => AppAction::None,
         }
     }
@@ -1898,5 +1988,172 @@ mod tests {
         let action = app.handle_key(key(KeyCode::Char('d')));
         assert!(matches!(action, AppAction::None));
         assert!(app.confirm_action.is_none());
+    }
+
+    // -- Session import / assign to project tests --
+
+    #[test]
+    fn test_toggle_untracked() {
+        let mut app = App::new();
+        assert!(!app.show_untracked);
+        app.handle_key(key(KeyCode::Char('i')));
+        assert!(app.show_untracked);
+        app.handle_key(key(KeyCode::Char('i')));
+        assert!(!app.show_untracked);
+    }
+
+    #[test]
+    fn test_visible_sessions_all() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session_with_project("s1", Some(1), None),
+            make_session("s2"),
+        ]);
+        assert_eq!(app.visible_sessions().len(), 2);
+    }
+
+    #[test]
+    fn test_visible_sessions_untracked_only() {
+        let mut app = App::new();
+        app.show_untracked = true;
+        app.update_sessions(vec![
+            make_session_with_project("s1", Some(1), None),
+            make_session("s2"),
+            make_session("s3"),
+        ]);
+        let visible = app.visible_sessions();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].id, "s2");
+        assert_eq!(visible[1].id, "s3");
+    }
+
+    #[test]
+    fn test_p_in_untracked_mode_opens_picker() {
+        let mut app = App::new();
+        app.show_untracked = true;
+        app.update_sessions(vec![make_session("s1")]);
+        app.update_projects(vec![make_project(1, "Proj1"), make_project(2, "Proj2")]);
+        app.handle_key(key(KeyCode::Char('p')));
+        assert!(app.project_picker.is_some());
+        assert_eq!(app.project_picker.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_p_in_normal_mode_goes_to_projects() {
+        let mut app = App::new();
+        app.update_sessions(vec![make_session("s1")]);
+        let action = app.handle_key(key(KeyCode::Char('p')));
+        assert!(app.project_picker.is_none());
+        assert_eq!(app.view_mode, ViewMode::Projects);
+        assert!(matches!(action, AppAction::LoadProjects));
+    }
+
+    #[test]
+    fn test_picker_esc_closes() {
+        let mut app = App::new();
+        app.project_picker = Some(vec![make_project(1, "P1")]);
+        app.handle_key(key(KeyCode::Esc));
+        assert!(app.project_picker.is_none());
+    }
+
+    #[test]
+    fn test_picker_jk_navigation() {
+        let mut app = App::new();
+        app.project_picker = Some(vec![
+            make_project(1, "P1"),
+            make_project(2, "P2"),
+            make_project(3, "P3"),
+        ]);
+        assert_eq!(app.picker_index, 0);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.picker_index, 1);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.picker_index, 2);
+
+        // Wrap forward
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.picker_index, 0);
+
+        // Wrap backward
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.picker_index, 2);
+
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.picker_index, 1);
+    }
+
+    #[test]
+    fn test_picker_enter_assigns() {
+        let mut app = App::new();
+        app.update_sessions(vec![make_session("s1")]);
+        app.project_picker = Some(vec![make_project(1, "P1"), make_project(2, "P2")]);
+        app.picker_index = 1;
+        let action = app.handle_key(key(KeyCode::Enter));
+        match action {
+            AppAction::AssignSessionToProject {
+                session_id,
+                project_id,
+            } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(project_id, 2);
+            }
+            _ => panic!("expected AssignSessionToProject, got {:?}", action),
+        }
+        assert!(app.project_picker.is_none());
+    }
+
+    #[test]
+    fn test_picker_enter_empty_sessions_returns_none() {
+        let mut app = App::new();
+        app.project_picker = Some(vec![make_project(1, "P1")]);
+        let action = app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.project_picker.is_none());
+    }
+
+    #[test]
+    fn test_picker_does_not_quit_on_q() {
+        let mut app = App::new();
+        app.project_picker = Some(vec![make_project(1, "P1")]);
+        let action = app.handle_key(key(KeyCode::Char('q')));
+        assert!(!app.should_quit);
+        assert!(matches!(action, AppAction::None));
+        // Picker stays open since 'q' is not handled
+        assert!(app.project_picker.is_some());
+    }
+
+    #[test]
+    fn test_toggle_untracked_resets_index() {
+        let mut app = App::new();
+        app.update_sessions(vec![
+            make_session("a"),
+            make_session("b"),
+            make_session("c"),
+        ]);
+        app.selected_index = 2;
+        app.handle_key(key(KeyCode::Char('i')));
+        assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn test_select_next_wraps_in_untracked_mode() {
+        let mut app = App::new();
+        app.show_untracked = true;
+        app.update_sessions(vec![
+            make_session_with_project("s1", Some(1), None),
+            make_session("s2"),
+            make_session("s3"),
+        ]);
+        // Only s2, s3 are visible
+        assert_eq!(app.visible_sessions().len(), 2);
+
+        app.select_next();
+        assert_eq!(app.selected_index, 1);
+
+        // Wrap
+        app.select_next();
+        assert_eq!(app.selected_index, 0);
     }
 }

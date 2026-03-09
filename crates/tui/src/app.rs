@@ -100,6 +100,10 @@ pub enum AppAction {
         head_commit: String,
         file_path: String,
     },
+    SubmitReview {
+        review_id: i64,
+        session_id: String,
+    },
 }
 
 pub struct App {
@@ -903,6 +907,18 @@ impl App {
                 head_commit: h,
                 file_path: f,
             }),
+            KeyCode::Char('S') => {
+                let Some(review) = &self.review else {
+                    return AppAction::None;
+                };
+                let Some(session_id) = review.session_id.clone() else {
+                    return AppAction::None;
+                };
+                AppAction::SubmitReview {
+                    review_id: review.id,
+                    session_id,
+                }
+            }
             KeyCode::Char('b') => {
                 self.view_mode = ViewMode::PlanDetail;
                 self.review = None;

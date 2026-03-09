@@ -56,7 +56,20 @@ fn draw_file_list(frame: &mut Frame, app: &App, area: Rect) {
 
 fn review_title(app: &App) -> String {
     match &app.review {
-        Some(r) => format!(" Review #{} - {} ({}) ", r.id, &r.branch, r.status.as_str()),
+        Some(r) => {
+            let submit_hint = if r.session_id.is_some() {
+                " | S:submit"
+            } else {
+                ""
+            };
+            format!(
+                " Review #{} - {} ({}){} ",
+                r.id,
+                &r.branch,
+                r.status.as_str(),
+                submit_hint
+            )
+        }
         None => " Files ".to_string(),
     }
 }
@@ -592,6 +605,43 @@ mod tests {
         });
         // review loaded but no diff files
         let action = app.handle_key(key(KeyCode::Char('d')));
+        assert!(matches!(action, crate::app::AppAction::None));
+    }
+
+    #[test]
+    fn test_submit_review_with_session() {
+        let mut app = setup_review_app();
+        app.review = Some(ca_lib::review::Review {
+            id: 10,
+            session_id: Some("sess-42".to_string()),
+            project_id: None,
+            branch: "feature".to_string(),
+            base_commit: "abc123".to_string(),
+            head_commit: "def456".to_string(),
+            status: ca_lib::review::ReviewStatus::InProgress,
+            round: 1,
+            created_at: 0,
+            updated_at: 0,
+        });
+
+        let action = app.handle_key(key(KeyCode::Char('S')));
+        match action {
+            crate::app::AppAction::SubmitReview {
+                review_id,
+                session_id,
+            } => {
+                assert_eq!(review_id, 10);
+                assert_eq!(session_id, "sess-42");
+            }
+            other => panic!("Expected SubmitReview, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_submit_review_no_session() {
+        let mut app = setup_review_app_with_review();
+        // setup_review_app_with_review sets session_id to None
+        let action = app.handle_key(key(KeyCode::Char('S')));
         assert!(matches!(action, crate::app::AppAction::None));
     }
 }

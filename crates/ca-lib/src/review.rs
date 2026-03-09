@@ -2,6 +2,7 @@ use crate::db::{Database, DbError};
 use rusqlite::OptionalExtension;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -117,6 +118,52 @@ fn row_to_comment(row: &rusqlite::Row) -> rusqlite::Result<ReviewComment> {
         resolved: resolved_int != 0,
         created_at: row.get(7)?,
     })
+}
+
+/// Format review comments as markdown feedback text.
+/// Groups comments by file, includes file:line references.
+pub fn format_review_feedback(review: &Review, comments: &[ReviewComment]) -> String {
+    if comments.is_empty() {
+        return String::new();
+    }
+
+    let mut output = String::new();
+    output.push_str(&format!("## Code Review (Round {})\n\n", review.round));
+
+    let base_short = &review.base_commit[..7.min(review.base_commit.len())];
+    let head_short = &review.head_commit[..7.min(review.head_commit.len())];
+    output.push_str(&format!(
+        "Branch: {} ({}..{})\n\n",
+        review.branch, base_short, head_short
+    ));
+
+    let mut by_file: BTreeMap<&str, Vec<&ReviewComment>> = BTreeMap::new();
+    for comment in comments {
+        by_file.entry(&comment.file_path).or_default().push(comment);
+    }
+
+    for (file, mut file_comments) in by_file {
+        output.push_str(&format!("### {}\n\n", file));
+        file_comments.sort_by_key(|c| c.line_number);
+        for comment in file_comments {
+            output.push_str(&format!(
+                "- **Line {}**: {}\n",
+                comment.line_number, comment.body
+            ));
+        }
+        output.push('\n');
+    }
+
+    output
+}
+
+/// Escape special characters for tmux send-keys.
+/// Semicolons, quotes, and backslashes need escaping.
+pub fn escape_for_tmux(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace('"', "\\\"")
+        .replace('\'', "\\'")
 }
 
 fn now_unix() -> i64 {
@@ -674,5 +721,102 @@ mod tests {
 
         let deleted = db.delete_review(9999).unwrap();
         assert!(!deleted);
+    }
+
+    fn make_review(round: i32) -> super::Review {
+        super::Review {
+            id: 1,
+            session_id: Some("sess-1".to_string()),
+            project_id: None,
+            branch: "feature/login".to_string(),
+            base_commit: "abc1234567890".to_string(),
+            head_commit: "def4567890abc".to_string(),
+            status: ReviewStatus::InProgress,
+            round,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn make_comment(file_path: &str, line: u32, body: &str) -> super::ReviewComment {
+        super::ReviewComment {
+            id: 0,
+            review_id: 1,
+            commit_sha: "abc1234".to_string(),
+            file_path: file_path.to_string(),
+            line_number: line,
+            body: body.to_string(),
+            resolved: false,
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_format_review_feedback_basic() {
+        let review = make_review(1);
+        let comments = vec![make_comment("src/main.rs", 10, "Fix this")];
+        let output = super::format_review_feedback(&review, &comments);
+
+        assert!(output.contains("## Code Review (Round 1)"));
+        assert!(output.contains("Branch: feature/login (abc1234..def4567)"));
+        assert!(output.contains("### src/main.rs"));
+        assert!(output.contains("- **Line 10**: Fix this"));
+    }
+
+    #[test]
+    fn test_format_review_feedback_empty() {
+        let review = make_review(1);
+        let output = super::format_review_feedback(&review, &[]);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_format_review_feedback_groups_by_file() {
+        let review = make_review(2);
+        let comments = vec![
+            make_comment("src/main.rs", 20, "Second line"),
+            make_comment("src/main.rs", 5, "First line"),
+        ];
+        let output = super::format_review_feedback(&review, &comments);
+
+        // Both under same file heading
+        assert_eq!(output.matches("### src/main.rs").count(), 1);
+        // Sorted by line: line 5 before line 20
+        let pos5 = output.find("Line 5").unwrap();
+        let pos20 = output.find("Line 20").unwrap();
+        assert!(pos5 < pos20);
+    }
+
+    #[test]
+    fn test_format_review_feedback_multiple_files() {
+        let review = make_review(1);
+        let comments = vec![
+            make_comment("src/lib.rs", 3, "A comment"),
+            make_comment("src/main.rs", 10, "Another comment"),
+        ];
+        let output = super::format_review_feedback(&review, &comments);
+
+        assert!(output.contains("### src/lib.rs"));
+        assert!(output.contains("### src/main.rs"));
+        // BTreeMap means lib.rs comes before main.rs
+        let pos_lib = output.find("### src/lib.rs").unwrap();
+        let pos_main = output.find("### src/main.rs").unwrap();
+        assert!(pos_lib < pos_main);
+    }
+
+    #[test]
+    fn test_escape_for_tmux() {
+        assert_eq!(super::escape_for_tmux("hello;world"), "hello\\;world");
+        assert_eq!(super::escape_for_tmux("say \"hi\""), "say \\\"hi\\\"");
+        assert_eq!(super::escape_for_tmux("it's"), "it\\'s");
+        assert_eq!(super::escape_for_tmux("back\\slash"), "back\\\\slash");
+        // Multiple special chars in one string
+        assert_eq!(super::escape_for_tmux("a;b\"c\\d"), "a\\;b\\\"c\\\\d");
+    }
+
+    #[test]
+    fn test_escape_for_tmux_no_special() {
+        let text = "normal text with spaces 123";
+        assert_eq!(super::escape_for_tmux(text), text);
     }
 }

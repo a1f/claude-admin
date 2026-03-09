@@ -405,6 +405,12 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 app.set_status("Comment added");
             }
         }
+        AppAction::SubmitReview {
+            review_id,
+            session_id,
+        } => {
+            submit_review(app, db, review_id, &session_id);
+        }
         // Handled in run_event_loop before reaching handle_action
         AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {}
     }
@@ -417,6 +423,53 @@ fn resolve_review_repo_path(app: &App, db: Option<&Database>) -> Option<String> 
     let project = db.get_project(project_id).ok()??;
     let workspace = db.get_workspace(project.workspace_id).ok()??;
     Some(project.worktree_path.unwrap_or(workspace.path))
+}
+
+fn submit_review(app: &mut App, db: Option<&Database>, review_id: i64, session_id: &str) {
+    let Some(db) = db else {
+        return;
+    };
+
+    let comments = match db.get_review_comments(review_id) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let review = match db.get_review(review_id) {
+        Ok(Some(r)) => r,
+        _ => return,
+    };
+
+    let feedback = ca_lib::review::format_review_feedback(&review, &comments);
+    if feedback.is_empty() {
+        app.set_status("No comments to submit");
+        return;
+    }
+
+    let session = match db.get_session(session_id) {
+        Ok(Some(s)) => s,
+        _ => {
+            app.set_status("Session not found");
+            return;
+        }
+    };
+
+    let escaped = ca_lib::review::escape_for_tmux(&feedback);
+    let _ = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &session.pane_id, &escaped, "Enter"])
+        .status();
+
+    let _ = db.update_review_status(review_id, ca_lib::review::ReviewStatus::ChangesRequested);
+    let _ = db.increment_review_round(review_id);
+
+    app.set_status(format!(
+        "Review feedback sent ({} comments)",
+        comments.len()
+    ));
+
+    if let Ok(Some(updated)) = db.get_review(review_id) {
+        app.review = Some(updated);
+    }
 }
 
 fn handle_form_submit(

@@ -9,7 +9,9 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Wrap,
+};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -43,6 +45,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         if app.input_mode == InputMode::Form {
             draw_form_overlay(frame, form, area);
         }
+    }
+
+    if app.input_mode == InputMode::Help {
+        draw_help_overlay(frame, app, area);
     }
 }
 
@@ -320,4 +326,75 @@ fn draw_form_field(
             .border_style(border_style),
     );
     frame.render_widget(input_widget, field_chunks[1]);
+}
+
+fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::help::help_content;
+
+    let entries = help_content(app.view_mode);
+
+    let width = area.width * 70 / 100;
+    let height = area.height * 80 / 100;
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y + (area.height - height) / 2;
+    let overlay_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, overlay_area);
+
+    let view_name = match app.view_mode {
+        ViewMode::Sessions => "Sessions",
+        ViewMode::Projects => "Projects",
+        ViewMode::Plans => "Plans",
+        ViewMode::PlanDetail => "Plan Detail",
+        ViewMode::Orchestrator => "Orchestrator",
+    };
+
+    let block = Block::default()
+        .title(format!(" Help \u{2014} {view_name} (? or Esc to close) "))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(overlay_area);
+    frame.render_widget(block, overlay_area);
+
+    let header = Row::new(vec![
+        Cell::from("Key").style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        ),
+        Cell::from("Action").style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        ),
+        Cell::from("CLI Command").style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        ),
+    ]);
+
+    let rows: Vec<Row> = entries
+        .iter()
+        .map(|(key_str, action, cli)| {
+            Row::new(vec![
+                Cell::from(*key_str).style(Style::default().fg(Color::Yellow)),
+                Cell::from(*action),
+                Cell::from(*cli).style(Style::default().fg(Color::DarkGray)),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(12),
+            Constraint::Min(20),
+            Constraint::Min(30),
+        ],
+    )
+    .header(header)
+    .row_highlight_style(Style::default());
+
+    frame.render_widget(table, inner);
 }

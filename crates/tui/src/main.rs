@@ -2,6 +2,7 @@ mod app;
 mod command_palette;
 mod commands;
 mod form;
+mod help;
 mod input;
 mod plan_view;
 mod project_view;

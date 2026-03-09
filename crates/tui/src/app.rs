@@ -12,7 +12,6 @@ pub enum InputMode {
     Normal,
     Command,
     Form,
-    #[allow(dead_code)]
     Help,
 }
 
@@ -233,6 +232,12 @@ impl App {
             return match self.input_mode {
                 InputMode::Command => self.handle_command_key(key),
                 InputMode::Form => self.handle_form_key(key),
+                InputMode::Help => {
+                    if key.code == KeyCode::Esc || key.code == KeyCode::Char('?') {
+                        self.input_mode = InputMode::Normal;
+                    }
+                    AppAction::None
+                }
                 _ => {
                     if key.code == KeyCode::Esc {
                         self.input_mode = InputMode::Normal;
@@ -250,6 +255,10 @@ impl App {
             KeyCode::Char(':') => {
                 self.input_mode = InputMode::Command;
                 self.command_palette.open();
+                AppAction::None
+            }
+            KeyCode::Char('?') => {
+                self.input_mode = InputMode::Help;
                 AppAction::None
             }
             _ => match self.view_mode {
@@ -1646,5 +1655,34 @@ mod tests {
         app.update_workspaces(ws);
         assert_eq!(app.workspace_index, 0);
         assert_eq!(app.workspaces.len(), 2);
+    }
+
+    // -- Help mode tests --
+
+    #[test]
+    fn test_question_mark_opens_help() {
+        let mut app = App::new();
+        let action = app.handle_key(key(KeyCode::Char('?')));
+        assert_eq!(app.input_mode, InputMode::Help);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_question_mark_in_help_closes() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Help;
+        let action = app.handle_key(key(KeyCode::Char('?')));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_esc_in_help_closes() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Help;
+        let action = app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(!app.should_quit);
+        assert!(matches!(action, AppAction::None));
     }
 }

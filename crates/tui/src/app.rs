@@ -6,6 +6,7 @@ use ca_lib::plan::{Plan, Step, StepStatus};
 use ca_lib::project::Project;
 use ca_lib::workspace::Workspace;
 use crossterm::event::{KeyCode, KeyEvent};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
@@ -102,6 +103,7 @@ pub struct App {
     pub show_untracked: bool,
     pub project_picker: Option<Vec<Project>>,
     pub picker_index: usize,
+    pub status_message: Option<(String, Instant)>,
 }
 
 impl App {
@@ -130,6 +132,7 @@ impl App {
             show_untracked: false,
             project_picker: None,
             picker_index: 0,
+            status_message: None,
         }
     }
 
@@ -156,6 +159,18 @@ impl App {
         };
         self.form_overlay = Some(form);
         self.input_mode = InputMode::Form;
+    }
+
+    pub fn set_status(&mut self, msg: impl Into<String>) {
+        self.status_message = Some((msg.into(), Instant::now()));
+    }
+
+    pub fn clear_stale_status(&mut self) {
+        if let Some((_, instant)) = &self.status_message {
+            if instant.elapsed() > Duration::from_secs(5) {
+                self.status_message = None;
+            }
+        }
     }
 
     pub fn update_preview(&mut self, events: Vec<Event>) {
@@ -2155,5 +2170,35 @@ mod tests {
         // Wrap
         app.select_next();
         assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn test_set_status_stores_message() {
+        let mut app = App::new();
+        app.set_status("Created project");
+        assert!(app.status_message.is_some());
+        assert_eq!(app.status_message.as_ref().unwrap().0, "Created project");
+    }
+
+    #[test]
+    fn test_status_message_default_none() {
+        let app = App::new();
+        assert!(app.status_message.is_none());
+    }
+
+    #[test]
+    fn test_clear_stale_status_keeps_fresh() {
+        let mut app = App::new();
+        app.set_status("Fresh");
+        app.clear_stale_status();
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn test_clear_stale_status_removes_old() {
+        let mut app = App::new();
+        app.status_message = Some(("Old".to_string(), Instant::now() - Duration::from_secs(6)));
+        app.clear_stale_status();
+        assert!(app.status_message.is_none());
     }
 }

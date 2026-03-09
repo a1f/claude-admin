@@ -17,15 +17,12 @@ use ratatui::widgets::{
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    let (main_area, bar_area) = if app.input_mode == InputMode::Command {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(area);
-        (chunks[0], Some(chunks[1]))
-    } else {
-        (area, None)
-    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+    let main_area = chunks[0];
+    let bar_area = chunks[1];
 
     match app.view_mode {
         ViewMode::Sessions => draw_sessions(frame, app, main_area),
@@ -35,21 +32,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app, main_area),
     }
 
-    if let Some(bar) = bar_area {
-        draw_command_bar(frame, app, bar);
+    if app.input_mode == InputMode::Command {
+        draw_command_bar(frame, app, bar_area);
         if !app.command_palette.suggestions.is_empty() {
-            draw_suggestions(frame, &app.command_palette, bar);
+            draw_suggestions(frame, &app.command_palette, bar_area);
         }
-    }
-
-    // Show confirmation or feedback message when not in command mode
-    if app.input_mode != InputMode::Command {
-        if let Some(msg) = &app.command_palette.message {
-            let bar_area = Rect::new(area.x, area.height.saturating_sub(1), area.width, 1);
-            let msg_widget = Paragraph::new(msg.as_str())
-                .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray));
-            frame.render_widget(msg_widget, bar_area);
-        }
+    } else {
+        draw_status_bar(frame, app, bar_area);
     }
 
     if let Some(form) = &app.form_overlay {
@@ -205,6 +194,40 @@ fn state_color(state: &SessionState) -> Color {
         SessionState::Done => Color::DarkGray,
         SessionState::Idle => Color::White,
     }
+}
+
+fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let right_msg = if let Some(msg) = &app.command_palette.message {
+        msg.clone()
+    } else if let Some((msg, _)) = &app.status_message {
+        msg.clone()
+    } else {
+        String::new()
+    };
+
+    let left_hints = match app.view_mode {
+        ViewMode::Sessions => "p:projects i:filter N:new-ws ?:help",
+        ViewMode::Projects => "n:new d:del b:back ?:help",
+        ViewMode::Plans => "n:new d:del b:back ?:help",
+        ViewMode::PlanDetail => "s:status o:orch b:back ?:help",
+        ViewMode::Orchestrator => "Tab:panel s:spawn a:attach b:back ?:help",
+    };
+
+    let left = Span::styled(
+        format!(" {left_hints}"),
+        Style::default().fg(Color::DarkGray),
+    );
+    let right = Span::styled(format!("{right_msg} "), Style::default().fg(Color::Yellow));
+
+    let available = area.width as usize;
+    let left_len = left_hints.len() + 1;
+    let right_len = right_msg.len() + 1;
+    let filler_len = available.saturating_sub(left_len + right_len);
+    let filler = " ".repeat(filler_len);
+
+    let line = Line::from(vec![left, Span::raw(filler), right]);
+    let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
+    frame.render_widget(bar, area);
 }
 
 fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {

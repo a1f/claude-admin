@@ -80,6 +80,7 @@ async fn run_event_loop(
     db: Option<&Database>,
 ) -> io::Result<()> {
     loop {
+        app.clear_stale_status();
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if event::poll(Duration::ZERO)? {
@@ -188,6 +189,7 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         AppAction::CreateWorkspace { path, name } => {
             if let Some(db) = db {
                 if let Ok(_ws) = db.create_workspace(&path, name.as_deref()) {
+                    app.set_status("Created workspace");
                     if let Ok(workspaces) = db.list_workspaces() {
                         app.update_workspaces(workspaces);
                     }
@@ -201,6 +203,7 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         } => {
             if let Some(db) = db {
                 if let Ok(_proj) = db.create_project(workspace_id, &name, description.as_deref()) {
+                    app.set_status(format!("Created project '{name}'"));
                     if let Ok(projects) = db.list_projects() {
                         app.update_projects(projects);
                     }
@@ -211,6 +214,7 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
             let content = PlanContent { phases: vec![] };
             if let Some(db) = db {
                 if let Ok(_plan) = db.create_plan(project_id, &name, &content) {
+                    app.set_status(format!("Created plan '{name}'"));
                     if let Ok(plans) = db.list_plans_by_project(project_id) {
                         app.update_plans(plans);
                     }
@@ -220,6 +224,7 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         AppAction::DeleteWorkspace(id) => {
             if let Some(db) = db {
                 let _ = db.delete_workspace(id);
+                app.set_status("Deleted workspace");
                 if let Ok(workspaces) = db.list_workspaces() {
                     app.update_workspaces(workspaces);
                 }
@@ -228,6 +233,7 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         AppAction::DeleteProject(id) => {
             if let Some(db) = db {
                 let _ = db.delete_project(id);
+                app.set_status("Deleted project");
                 if let Ok(projects) = db.list_projects() {
                     app.update_projects(projects);
                 }
@@ -236,6 +242,7 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         AppAction::DeletePlan(id) => {
             if let Some(db) = db {
                 let _ = db.delete_plan(id);
+                app.set_status("Deleted plan");
                 if let Some(project) = app.projects.get(app.project_index) {
                     if let Ok(plans) = db.list_plans_by_project(project.id) {
                         app.update_plans(plans);
@@ -262,6 +269,7 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 if let Ok(Some(mut session)) = db.get_session(&session_id) {
                     session.project_id = Some(project_id);
                     let _ = db.update_session(&session);
+                    app.set_status("Session assigned to project");
                 }
             }
         }
@@ -281,6 +289,7 @@ fn handle_form_submit(
             let path = &values[0];
             let name = values.get(1).filter(|v| !v.is_empty()).map(String::as_str);
             if let Ok(_ws) = db.create_workspace(path, name) {
+                app.set_status(format!("Created workspace '{path}'"));
                 if let Ok(workspaces) = db.list_workspaces() {
                     app.update_workspaces(workspaces);
                 }
@@ -290,6 +299,7 @@ fn handle_form_submit(
             let name = &values[0];
             let desc = values.get(1).filter(|v| !v.is_empty()).map(String::as_str);
             if let Ok(_proj) = db.create_project(workspace_id, name, desc) {
+                app.set_status(format!("Created project '{name}'"));
                 if let Ok(projects) = db.list_projects() {
                     app.update_projects(projects);
                 }
@@ -299,6 +309,7 @@ fn handle_form_submit(
             let name = &values[0];
             let content = PlanContent { phases: vec![] };
             if let Ok(_plan) = db.create_plan(project_id, name, &content) {
+                app.set_status(format!("Created plan '{name}'"));
                 if let Ok(plans) = db.list_plans_by_project(project_id) {
                     app.update_plans(plans);
                 }

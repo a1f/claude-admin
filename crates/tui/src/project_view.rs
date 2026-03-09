@@ -9,19 +9,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 pub fn draw_orchestrator(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)])
-        .split(area);
-
     let panels = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[0]);
+        .split(area);
 
     draw_orch_steps(frame, app, panels[0]);
     draw_orch_sessions(frame, app, panels[1]);
-    draw_orch_status(frame, app, chunks[1]);
 }
 
 fn draw_orch_steps(frame: &mut Frame, app: &App, area: Rect) {
@@ -161,35 +155,6 @@ fn draw_orch_sessions(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     frame.render_stateful_widget(list, area, &mut state);
-}
-
-fn draw_orch_status(frame: &mut Frame, app: &App, area: Rect) {
-    let panel_name = match app.orch_panel {
-        OrchPanel::Steps => "steps",
-        OrchPanel::Sessions => "sessions",
-    };
-
-    let status = Line::from(vec![
-        Span::styled(" s", Style::default().fg(Color::Cyan)),
-        Span::raw(":spawn  "),
-        Span::styled("a", Style::default().fg(Color::Cyan)),
-        Span::raw(":attach  "),
-        Span::styled("Tab", Style::default().fg(Color::Cyan)),
-        Span::raw(":switch panel  "),
-        Span::styled("b", Style::default().fg(Color::Cyan)),
-        Span::raw(":back  "),
-        Span::styled("q", Style::default().fg(Color::Cyan)),
-        Span::raw(":quit  "),
-        Span::styled(
-            format!("[{panel_name}]"),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
-
-    let bar = Paragraph::new(status);
-    frame.render_widget(bar, area);
 }
 
 fn panel_border_style(active: bool) -> Style {

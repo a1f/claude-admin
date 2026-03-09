@@ -1,7 +1,7 @@
 use crate::input::TextInput;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code, clippy::enum_variant_names)]
+#[allow(clippy::enum_variant_names)]
 pub enum FormKind {
     CreateWorkspace,
     CreateProject { workspace_id: i64 },
@@ -14,7 +14,6 @@ pub struct FormField {
 }
 
 pub struct FormOverlay {
-    #[allow(dead_code)]
     pub kind: FormKind,
     pub title: String,
     pub fields: Vec<FormField>,
@@ -23,7 +22,6 @@ pub struct FormOverlay {
 }
 
 impl FormOverlay {
-    #[allow(dead_code)]
     pub fn new_workspace() -> Self {
         Self {
             kind: FormKind::CreateWorkspace,
@@ -43,7 +41,6 @@ impl FormOverlay {
         }
     }
 
-    #[allow(dead_code)]
     pub fn new_project(workspace_id: i64) -> Self {
         Self {
             kind: FormKind::CreateProject { workspace_id },
@@ -63,7 +60,6 @@ impl FormOverlay {
         }
     }
 
-    #[allow(dead_code)]
     pub fn new_plan(project_id: i64) -> Self {
         Self {
             kind: FormKind::CreatePlan { project_id },
@@ -107,6 +103,14 @@ impl FormOverlay {
             }
         }
         Ok(())
+    }
+
+    /// Extract field values as a Vec of trimmed strings.
+    pub fn field_values(&self) -> Vec<String> {
+        self.fields
+            .iter()
+            .map(|f| f.input.value().trim().to_string())
+            .collect()
     }
 }
 
@@ -187,6 +191,22 @@ mod tests {
         form.fields[0].input.set_value("/some/path");
         // Leave field[1] (optional) empty
         assert!(form.validate().is_ok());
+    }
+
+    #[test]
+    fn test_field_values_returns_trimmed() {
+        let mut form = FormOverlay::new_workspace();
+        form.fields[0].input.set_value("  /some/path  ");
+        form.fields[1].input.set_value("  MyName  ");
+        let values = form.field_values();
+        assert_eq!(values, vec!["/some/path", "MyName"]);
+    }
+
+    #[test]
+    fn test_field_values_empty_fields() {
+        let form = FormOverlay::new_workspace();
+        let values = form.field_values();
+        assert_eq!(values, vec!["", ""]);
     }
 
     #[test]

@@ -1,9 +1,10 @@
 use crate::command_palette::CommandPalette;
-use crate::form::FormOverlay;
+use crate::form::{FormKind, FormOverlay};
 use ca_lib::events::Event;
 use ca_lib::models::Session;
 use ca_lib::plan::{Plan, Step, StepStatus};
 use ca_lib::project::Project;
+use ca_lib::workspace::Workspace;
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,30 @@ pub enum AppAction {
     AttachSession(String),
     ExecuteCommand(String),
     SubmitForm,
+    #[allow(dead_code)]
+    CreateWorkspace {
+        path: String,
+        name: Option<String>,
+    },
+    #[allow(dead_code)]
+    CreateProject {
+        workspace_id: i64,
+        name: String,
+        description: Option<String>,
+    },
+    #[allow(dead_code)]
+    CreatePlan {
+        project_id: i64,
+        name: String,
+    },
+    #[allow(dead_code)]
+    DeleteWorkspace(i64),
+    #[allow(dead_code)]
+    DeleteProject(i64),
+    #[allow(dead_code)]
+    DeletePlan(i64),
+    #[allow(dead_code)]
+    OpenForm(FormKind),
 }
 
 pub struct App {
@@ -59,6 +84,8 @@ pub struct App {
     pub connected: bool,
     pub input_mode: InputMode,
     pub view_mode: ViewMode,
+    pub workspaces: Vec<Workspace>,
+    pub workspace_index: usize,
     pub projects: Vec<Project>,
     pub project_index: usize,
     pub plans: Vec<Plan>,
@@ -81,6 +108,8 @@ impl App {
             connected: false,
             input_mode: InputMode::Normal,
             view_mode: ViewMode::Sessions,
+            workspaces: Vec::new(),
+            workspace_index: 0,
             projects: Vec::new(),
             project_index: 0,
             plans: Vec::new(),
@@ -102,6 +131,21 @@ impl App {
             self.selected_index = self.sessions.len() - 1;
         }
         self.preview_events.clear();
+    }
+
+    pub fn update_workspaces(&mut self, workspaces: Vec<Workspace>) {
+        self.workspaces = workspaces;
+        self.workspace_index = 0;
+    }
+
+    pub fn open_form(&mut self, kind: FormKind) {
+        let form = match &kind {
+            FormKind::CreateWorkspace => FormOverlay::new_workspace(),
+            FormKind::CreateProject { workspace_id } => FormOverlay::new_project(*workspace_id),
+            FormKind::CreatePlan { project_id } => FormOverlay::new_plan(*project_id),
+        };
+        self.form_overlay = Some(form);
+        self.input_mode = InputMode::Form;
     }
 
     pub fn update_preview(&mut self, events: Vec<Event>) {
@@ -1532,5 +1576,62 @@ mod tests {
             app.form_overlay.as_ref().unwrap().fields[0].input.value(),
             "/d"
         );
+    }
+
+    // -- open_form tests --
+
+    #[test]
+    fn test_open_form_sets_input_mode() {
+        let mut app = App::new();
+        app.open_form(FormKind::CreateWorkspace);
+        assert_eq!(app.input_mode, InputMode::Form);
+        assert!(app.form_overlay.is_some());
+        assert_eq!(
+            app.form_overlay.as_ref().unwrap().kind,
+            FormKind::CreateWorkspace
+        );
+    }
+
+    #[test]
+    fn test_open_form_project() {
+        let mut app = App::new();
+        app.open_form(FormKind::CreateProject { workspace_id: 42 });
+        assert_eq!(app.input_mode, InputMode::Form);
+        let form = app.form_overlay.as_ref().unwrap();
+        assert_eq!(form.kind, FormKind::CreateProject { workspace_id: 42 });
+    }
+
+    #[test]
+    fn test_open_form_plan() {
+        let mut app = App::new();
+        app.open_form(FormKind::CreatePlan { project_id: 7 });
+        assert_eq!(app.input_mode, InputMode::Form);
+        let form = app.form_overlay.as_ref().unwrap();
+        assert_eq!(form.kind, FormKind::CreatePlan { project_id: 7 });
+    }
+
+    #[test]
+    fn test_update_workspaces() {
+        let mut app = App::new();
+        app.workspace_index = 5;
+        let ws = vec![
+            Workspace {
+                id: 1,
+                name: "ws1".to_string(),
+                path: "/a".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            },
+            Workspace {
+                id: 2,
+                name: "ws2".to_string(),
+                path: "/b".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            },
+        ];
+        app.update_workspaces(ws);
+        assert_eq!(app.workspace_index, 0);
+        assert_eq!(app.workspaces.len(), 2);
     }
 }

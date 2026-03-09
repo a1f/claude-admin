@@ -9,6 +9,7 @@ mod ui;
 use app::{App, AppAction};
 use ca_lib::db::Database;
 use ca_lib::ipc::{IpcClient, Request, Response};
+use ca_lib::plan::PlanContent;
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
@@ -169,7 +170,110 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
             // Command execution will be wired in M2.5 (command parser)
         }
         AppAction::SubmitForm => {
-            // Will be wired in M2.4
+            if let Some(form) = app.form_overlay.take() {
+                let values = form.field_values();
+                handle_form_submit(form.kind, &values, app, db);
+            }
+        }
+        AppAction::OpenForm(kind) => {
+            app.open_form(kind);
+        }
+        AppAction::CreateWorkspace { path, name } => {
+            if let Some(db) = db {
+                if let Ok(_ws) = db.create_workspace(&path, name.as_deref()) {
+                    if let Ok(workspaces) = db.list_workspaces() {
+                        app.update_workspaces(workspaces);
+                    }
+                }
+            }
+        }
+        AppAction::CreateProject {
+            workspace_id,
+            name,
+            description,
+        } => {
+            if let Some(db) = db {
+                if let Ok(_proj) = db.create_project(workspace_id, &name, description.as_deref()) {
+                    if let Ok(projects) = db.list_projects() {
+                        app.update_projects(projects);
+                    }
+                }
+            }
+        }
+        AppAction::CreatePlan { project_id, name } => {
+            let content = PlanContent { phases: vec![] };
+            if let Some(db) = db {
+                if let Ok(_plan) = db.create_plan(project_id, &name, &content) {
+                    if let Ok(plans) = db.list_plans_by_project(project_id) {
+                        app.update_plans(plans);
+                    }
+                }
+            }
+        }
+        AppAction::DeleteWorkspace(id) => {
+            if let Some(db) = db {
+                let _ = db.delete_workspace(id);
+                if let Ok(workspaces) = db.list_workspaces() {
+                    app.update_workspaces(workspaces);
+                }
+            }
+        }
+        AppAction::DeleteProject(id) => {
+            if let Some(db) = db {
+                let _ = db.delete_project(id);
+                if let Ok(projects) = db.list_projects() {
+                    app.update_projects(projects);
+                }
+            }
+        }
+        AppAction::DeletePlan(id) => {
+            if let Some(db) = db {
+                let _ = db.delete_plan(id);
+                if let Some(project) = app.projects.get(app.project_index) {
+                    if let Ok(plans) = db.list_plans_by_project(project.id) {
+                        app.update_plans(plans);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn handle_form_submit(
+    kind: form::FormKind,
+    values: &[String],
+    app: &mut App,
+    db: Option<&Database>,
+) {
+    let Some(db) = db else { return };
+
+    match kind {
+        form::FormKind::CreateWorkspace => {
+            let path = &values[0];
+            let name = values.get(1).filter(|v| !v.is_empty()).map(String::as_str);
+            if let Ok(_ws) = db.create_workspace(path, name) {
+                if let Ok(workspaces) = db.list_workspaces() {
+                    app.update_workspaces(workspaces);
+                }
+            }
+        }
+        form::FormKind::CreateProject { workspace_id } => {
+            let name = &values[0];
+            let desc = values.get(1).filter(|v| !v.is_empty()).map(String::as_str);
+            if let Ok(_proj) = db.create_project(workspace_id, name, desc) {
+                if let Ok(projects) = db.list_projects() {
+                    app.update_projects(projects);
+                }
+            }
+        }
+        form::FormKind::CreatePlan { project_id } => {
+            let name = &values[0];
+            let content = PlanContent { phases: vec![] };
+            if let Ok(_plan) = db.create_plan(project_id, name, &content) {
+                if let Ok(plans) = db.list_plans_by_project(project_id) {
+                    app.update_plans(plans);
+                }
+            }
         }
     }
 }

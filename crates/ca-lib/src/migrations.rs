@@ -31,7 +31,10 @@ pub fn run_migrations(conn: &Connection) -> Result<(), DbError> {
     let current_version = get_schema_version(conn)?;
 
     type MigrationFn = fn(&Connection) -> Result<(), rusqlite::Error>;
-    let migrations: &[(i64, MigrationFn)] = &[(1, migrate_001_session_project_link)];
+    let migrations: &[(i64, MigrationFn)] = &[
+        (1, migrate_001_session_project_link),
+        (2, migrate_002_reviews_tables),
+    ];
 
     for &(version, migrate_fn) in migrations {
         if version > current_version {
@@ -66,6 +69,43 @@ fn migrate_001_session_project_link(conn: &Connection) -> Result<(), rusqlite::E
         conn.execute_batch("ALTER TABLE sessions ADD COLUMN plan_step_id TEXT")?;
     }
 
+    Ok(())
+}
+
+fn migrate_002_reviews_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            project_id INTEGER,
+            branch TEXT NOT NULL,
+            base_commit TEXT NOT NULL,
+            head_commit TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            round INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS review_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id INTEGER NOT NULL,
+            commit_sha TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            line_number INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            resolved INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_reviews_project_id ON reviews(project_id);
+        CREATE INDEX IF NOT EXISTS idx_reviews_session_id ON reviews(session_id);
+        CREATE INDEX IF NOT EXISTS idx_review_comments_review_id ON review_comments(review_id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -109,7 +149,7 @@ mod tests {
 
         run_migrations(&conn).unwrap();
 
-        assert_eq!(get_schema_version(&conn).unwrap(), 1);
+        assert_eq!(get_schema_version(&conn).unwrap(), 2);
     }
 
     #[test]
@@ -191,13 +231,13 @@ mod tests {
     fn test_already_migrated_skips() {
         let conn = create_legacy_db();
         run_migrations(&conn).unwrap();
-        assert_eq!(get_schema_version(&conn).unwrap(), 1);
+        assert_eq!(get_schema_version(&conn).unwrap(), 2);
 
         // Manually insert a version record to simulate already-migrated
         let conn2 = create_legacy_db();
         run_migrations(&conn2).unwrap();
 
-        // Version should still be 1, not 2
-        assert_eq!(get_schema_version(&conn2).unwrap(), 1);
+        // Version should still be 2, not higher
+        assert_eq!(get_schema_version(&conn2).unwrap(), 2);
     }
 }

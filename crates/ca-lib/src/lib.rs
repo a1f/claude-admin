@@ -13,6 +13,7 @@ pub mod notify;
 pub mod orchestrator;
 pub mod plan;
 pub mod project;
+pub mod review;
 pub mod settings;
 pub mod spawn;
 pub mod state;

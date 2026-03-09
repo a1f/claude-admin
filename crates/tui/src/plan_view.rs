@@ -10,7 +10,7 @@ pub fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
     if app.projects.is_empty() {
         let block = Paragraph::new("No projects found.").block(
             Block::default()
-                .title(" Projects (b: back) ")
+                .title(" Projects (n:new d:del N:new-ws b:back ?:help) ")
                 .borders(Borders::ALL),
         );
         frame.render_widget(block, area);
@@ -38,7 +38,7 @@ pub fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title(" Projects (b: back) ")
+                .title(" Projects (n:new d:del N:new-ws b:back ?:help) ")
                 .borders(Borders::ALL),
         )
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
@@ -57,7 +57,10 @@ pub fn draw_plans(frame: &mut Frame, app: &App, area: Rect) {
         .map(|p| p.name.as_str())
         .unwrap_or("?");
 
-    let title = format!(" Plans - {} (b: back) ", project_name);
+    let title = format!(
+        " Plans \u{2014} {} (n:new d:del b:back ?:help) ",
+        project_name
+    );
 
     if app.plans.is_empty() {
         let block = Paragraph::new("No plans found.")

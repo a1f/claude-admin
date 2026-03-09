@@ -41,6 +41,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
     }
 
+    // Show confirmation or feedback message when not in command mode
+    if app.input_mode != InputMode::Command {
+        if let Some(msg) = &app.command_palette.message {
+            let bar_area = Rect::new(area.x, area.height.saturating_sub(1), area.width, 1);
+            let msg_widget = Paragraph::new(msg.as_str())
+                .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray));
+            frame.render_widget(msg_widget, bar_area);
+        }
+    }
+
     if let Some(form) = &app.form_overlay {
         if app.input_mode == InputMode::Form {
             draw_form_overlay(frame, form, area);
@@ -99,7 +109,7 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(
             Block::default()
-                .title(" Sessions (p: plans) ")
+                .title(" Sessions (p:projects N:new-ws ?:help) ")
                 .borders(Borders::ALL),
         )
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))

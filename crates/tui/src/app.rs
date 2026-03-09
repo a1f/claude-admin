@@ -93,6 +93,7 @@ pub struct App {
     pub orch_session_index: usize,
     pub command_palette: CommandPalette,
     pub form_overlay: Option<FormOverlay>,
+    pub confirm_action: Option<Box<AppAction>>,
 }
 
 impl App {
@@ -117,6 +118,7 @@ impl App {
             orch_session_index: 0,
             command_palette: CommandPalette::new(),
             form_overlay: None,
+            confirm_action: None,
         }
     }
 
@@ -242,6 +244,22 @@ impl App {
                     if key.code == KeyCode::Esc {
                         self.input_mode = InputMode::Normal;
                     }
+                    AppAction::None
+                }
+            };
+        }
+
+        // Handle pending confirmation (y accepts, anything else cancels)
+        if self.confirm_action.is_some() {
+            return match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    let action = self.confirm_action.take().unwrap();
+                    self.command_palette.message = None;
+                    *action
+                }
+                _ => {
+                    self.confirm_action = None;
+                    self.command_palette.message = None;
                     AppAction::None
                 }
             };
@@ -438,6 +456,7 @@ impl App {
                 self.view_mode = ViewMode::Projects;
                 AppAction::LoadProjects
             }
+            KeyCode::Char('N') => AppAction::OpenForm(FormKind::CreateWorkspace),
             _ => AppAction::None,
         }
     }
@@ -472,6 +491,24 @@ impl App {
                 self.view_mode = ViewMode::Sessions;
                 AppAction::None
             }
+            KeyCode::Char('n') => {
+                if let Some(ws) = self.workspaces.get(self.workspace_index) {
+                    AppAction::OpenForm(FormKind::CreateProject {
+                        workspace_id: ws.id,
+                    })
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(project) = self.projects.get(self.project_index) {
+                    self.confirm_action = Some(Box::new(AppAction::DeleteProject(project.id)));
+                    self.command_palette.message =
+                        Some(format!("Delete project '{}'? (y/n)", project.name));
+                }
+                AppAction::None
+            }
+            KeyCode::Char('N') => AppAction::OpenForm(FormKind::CreateWorkspace),
             _ => AppAction::None,
         }
     }
@@ -506,6 +543,24 @@ impl App {
                 self.view_mode = ViewMode::Projects;
                 AppAction::None
             }
+            KeyCode::Char('n') => {
+                if let Some(project) = self.projects.get(self.project_index) {
+                    AppAction::OpenForm(FormKind::CreatePlan {
+                        project_id: project.id,
+                    })
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(plan) = self.plans.get(self.plan_index) {
+                    self.confirm_action = Some(Box::new(AppAction::DeletePlan(plan.id)));
+                    self.command_palette.message =
+                        Some(format!("Delete plan '{}'? (y/n)", plan.name));
+                }
+                AppAction::None
+            }
+            KeyCode::Char('N') => AppAction::OpenForm(FormKind::CreateWorkspace),
             _ => AppAction::None,
         }
     }
@@ -1684,5 +1739,164 @@ mod tests {
         assert_eq!(app.input_mode, InputMode::Normal);
         assert!(!app.should_quit);
         assert!(matches!(action, AppAction::None));
+    }
+
+    // -- Inline CRUD keybinding tests --
+
+    fn make_workspace(id: i64, name: &str) -> Workspace {
+        Workspace {
+            id,
+            name: name.to_string(),
+            path: format!("/home/user/{name}"),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_n_in_projects_opens_form() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        app.update_workspaces(vec![make_workspace(1, "test")]);
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(
+            action,
+            AppAction::OpenForm(FormKind::CreateProject { workspace_id: 1 })
+        ));
+    }
+
+    #[test]
+    fn test_n_in_projects_no_workspace_is_noop() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_d_in_projects_sets_confirmation() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        app.update_projects(vec![make_project(1, "MyProject")]);
+        let action = app.handle_key(key(KeyCode::Char('d')));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.confirm_action.is_some());
+        assert!(app.command_palette.message.is_some());
+    }
+
+    #[test]
+    fn test_d_on_empty_projects_is_noop() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        let action = app.handle_key(key(KeyCode::Char('d')));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.confirm_action.is_none());
+    }
+
+    #[test]
+    fn test_confirm_y_executes_delete() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        app.update_projects(vec![make_project(42, "ToDelete")]);
+        app.handle_key(key(KeyCode::Char('d')));
+        let action = app.handle_key(key(KeyCode::Char('y')));
+        match action {
+            AppAction::DeleteProject(id) => assert_eq!(id, 42),
+            _ => panic!("expected DeleteProject, got {:?}", action),
+        }
+        assert!(app.confirm_action.is_none());
+    }
+
+    #[test]
+    fn test_confirm_n_cancels_delete() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        app.update_projects(vec![make_project(42, "ToDelete")]);
+        app.handle_key(key(KeyCode::Char('d')));
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.confirm_action.is_none());
+        assert!(app.command_palette.message.is_none());
+    }
+
+    #[test]
+    fn test_big_n_in_any_view_creates_workspace() {
+        for mode in [ViewMode::Sessions, ViewMode::Projects, ViewMode::Plans] {
+            let mut app = App::new();
+            app.view_mode = mode;
+            let action = app.handle_key(key(KeyCode::Char('N')));
+            assert!(
+                matches!(action, AppAction::OpenForm(FormKind::CreateWorkspace)),
+                "N should open workspace form in {:?}",
+                mode
+            );
+        }
+    }
+
+    #[test]
+    fn test_n_in_plans_opens_plan_form() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        app.update_projects(vec![make_project(7, "TestProj")]);
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(
+            action,
+            AppAction::OpenForm(FormKind::CreatePlan { project_id: 7 })
+        ));
+    }
+
+    #[test]
+    fn test_d_in_plans_sets_confirmation() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        app.update_plans(vec![make_plan(3, "MyPlan")]);
+        let action = app.handle_key(key(KeyCode::Char('d')));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.confirm_action.is_some());
+    }
+
+    #[test]
+    fn test_confirm_y_executes_plan_delete() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        app.update_plans(vec![make_plan(3, "MyPlan")]);
+        app.handle_key(key(KeyCode::Char('d')));
+        let action = app.handle_key(key(KeyCode::Char('y')));
+        match action {
+            AppAction::DeletePlan(id) => assert_eq!(id, 3),
+            _ => panic!("expected DeletePlan, got {:?}", action),
+        }
+        assert!(app.confirm_action.is_none());
+        assert!(app.command_palette.message.is_none());
+    }
+
+    #[test]
+    fn test_confirm_any_key_cancels() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Projects;
+        app.update_projects(vec![make_project(1, "P")]);
+        app.handle_key(key(KeyCode::Char('d')));
+        // Press 'x' instead of 'y'
+        let action = app.handle_key(key(KeyCode::Char('x')));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.confirm_action.is_none());
+        assert!(app.command_palette.message.is_none());
+    }
+
+    #[test]
+    fn test_n_in_plans_no_project_is_noop() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_d_on_empty_plans_is_noop() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Plans;
+        let action = app.handle_key(key(KeyCode::Char('d')));
+        assert!(matches!(action, AppAction::None));
+        assert!(app.confirm_action.is_none());
     }
 }

@@ -5,6 +5,15 @@ use ca_lib::project::Project;
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum InputMode {
+    Normal,
+    Command,
+    Form,
+    Help,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     Sessions,
     Projects,
@@ -44,6 +53,7 @@ pub struct App {
     pub should_quit: bool,
     pub preview_events: Vec<Event>,
     pub connected: bool,
+    pub input_mode: InputMode,
     pub view_mode: ViewMode,
     pub projects: Vec<Project>,
     pub project_index: usize,
@@ -63,6 +73,7 @@ impl App {
             should_quit: false,
             preview_events: Vec::new(),
             connected: false,
+            input_mode: InputMode::Normal,
             view_mode: ViewMode::Sessions,
             projects: Vec::new(),
             project_index: 0,
@@ -168,6 +179,14 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        if self.input_mode != InputMode::Normal {
+            if key.code == KeyCode::Esc {
+                self.input_mode = InputMode::Normal;
+                return AppAction::None;
+            }
+            return AppAction::None;
+        }
+
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.should_quit = true;
@@ -1174,5 +1193,70 @@ mod tests {
         let action = app.handle_key(key(KeyCode::Char('q')));
         assert!(app.should_quit);
         assert!(matches!(action, AppAction::Quit));
+    }
+
+    // -- InputMode gating tests --
+
+    #[test]
+    fn test_input_mode_default_normal() {
+        let app = App::new();
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_q_in_normal_mode_quits() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Normal;
+        let action = app.handle_key(key(KeyCode::Char('q')));
+        assert!(app.should_quit);
+        assert!(matches!(action, AppAction::Quit));
+    }
+
+    #[test]
+    fn test_q_in_command_mode_does_not_quit() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Command;
+        let action = app.handle_key(key(KeyCode::Char('q')));
+        assert!(!app.should_quit);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_q_in_form_mode_does_not_quit() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Form;
+        let action = app.handle_key(key(KeyCode::Char('q')));
+        assert!(!app.should_quit);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_esc_in_command_mode_returns_to_normal() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Command;
+        let action = app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(!app.should_quit);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_esc_in_help_mode_returns_to_normal() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Help;
+        let action = app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(!app.should_quit);
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_keys_ignored_in_non_normal_mode() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Command;
+        app.update_sessions(vec![make_session("a"), make_session("b")]);
+        let action = app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.selected_index, 0);
+        assert!(matches!(action, AppAction::None));
     }
 }

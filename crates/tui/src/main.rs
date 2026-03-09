@@ -1,4 +1,5 @@
 mod app;
+mod input;
 mod plan_view;
 mod project_view;
 mod ui;

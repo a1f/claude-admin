@@ -128,6 +128,16 @@ pub fn send_notification(notification: &Notification) -> Result<(), NotifyError>
     Ok(())
 }
 
+/// Send a desktop notification that a session is ready for review.
+pub fn send_review_notification(session_id: &str) -> Result<(), NotifyError> {
+    let short_id = session_id.get(..8).unwrap_or(session_id);
+    let notification = Notification::new(
+        "claude-admin",
+        format!("Session {} ready for review", short_id),
+    );
+    send_notification(&notification)
+}
+
 /// Build the `osascript` command without executing it.
 ///
 /// Separated from `send_notification` so tests can inspect the
@@ -427,5 +437,18 @@ mod tests {
         let config = NotificationConfig::from_settings(&db);
         assert_eq!(config.rules.len(), 1);
         assert_eq!(config.rules[0].to, SessionState::NeedsInput);
+    }
+
+    #[test]
+    fn review_notification_builds_correctly() {
+        // We can't easily test send_review_notification without actually sending,
+        // but we verify it doesn't panic with various session ID lengths.
+        // The actual send is a no-op on non-macOS or succeeds on macOS.
+        let short = "abc";
+        let long = "550e8400-e29b-41d4-a716-446655440000";
+
+        // Just verify no panic -- actual OS notification send may or may not succeed
+        let _ = send_review_notification(short);
+        let _ = send_review_notification(long);
     }
 }

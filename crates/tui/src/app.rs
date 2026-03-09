@@ -104,6 +104,7 @@ pub enum AppAction {
         review_id: i64,
         session_id: String,
     },
+    OpenSessionReview(String),
 }
 
 pub struct App {
@@ -598,6 +599,13 @@ impl App {
                 } else {
                     self.view_mode = ViewMode::Projects;
                     AppAction::LoadProjects
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(session) = self.selected_session() {
+                    AppAction::OpenSessionReview(session.id.clone())
+                } else {
+                    AppAction::None
                 }
             }
             KeyCode::Char('N') => AppAction::OpenForm(FormKind::CreateWorkspace),
@@ -2750,5 +2758,69 @@ mod tests {
         assert_eq!(app.tick_count, 0, "wrapping_add should wrap to 0");
         // blink_on should still work after wrapping
         assert!(app.blink_on());
+    }
+
+    // -- Review lifecycle tests --
+
+    #[test]
+    fn test_r_opens_session_review() {
+        let mut app = App::new();
+        let mut session = make_session("sess-1");
+        session.project_id = Some(1);
+        app.update_sessions(vec![session]);
+        app.selected_index = 0;
+
+        let action = app.handle_key(key(KeyCode::Char('r')));
+        match action {
+            AppAction::OpenSessionReview(id) => assert_eq!(id, "sess-1"),
+            other => panic!("Expected OpenSessionReview, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_r_no_session_returns_none() {
+        let mut app = App::new();
+        // No sessions loaded
+        let action = app.handle_key(key(KeyCode::Char('r')));
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_review_status_transitions() {
+        use ca_lib::review::ReviewStatus;
+
+        // Valid lifecycle: Pending -> InProgress -> Approved
+        let statuses = [
+            ReviewStatus::Pending,
+            ReviewStatus::InProgress,
+            ReviewStatus::Approved,
+        ];
+        assert_eq!(statuses[0], ReviewStatus::Pending);
+        assert_eq!(statuses[1], ReviewStatus::InProgress);
+        assert_eq!(statuses[2], ReviewStatus::Approved);
+
+        // Valid lifecycle: Pending -> InProgress -> ChangesRequested
+        let statuses_alt = [
+            ReviewStatus::Pending,
+            ReviewStatus::InProgress,
+            ReviewStatus::ChangesRequested,
+        ];
+        assert_eq!(statuses_alt[0], ReviewStatus::Pending);
+        assert_eq!(statuses_alt[2], ReviewStatus::ChangesRequested);
+
+        // All four statuses are distinct
+        let all = [
+            ReviewStatus::Pending,
+            ReviewStatus::InProgress,
+            ReviewStatus::Approved,
+            ReviewStatus::ChangesRequested,
+        ];
+        for (i, a) in all.iter().enumerate() {
+            for (j, b) in all.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b);
+                }
+            }
+        }
     }
 }

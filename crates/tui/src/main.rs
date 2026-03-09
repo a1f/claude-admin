@@ -411,6 +411,25 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         } => {
             submit_review(app, db, review_id, &session_id);
         }
+        AppAction::OpenSessionReview(session_id) => {
+            if let Some(db) = db {
+                if let Ok(reviews) = db.list_reviews_by_session(&session_id) {
+                    let active = reviews.into_iter().find(|r| {
+                        r.status == ca_lib::review::ReviewStatus::Pending
+                            || r.status == ca_lib::review::ReviewStatus::InProgress
+                    });
+                    if let Some(review) = active {
+                        app.review = Some(review);
+                        app.view_mode = app::ViewMode::Review;
+                        app.review_scroll = 0;
+                        app.review_file_index = 0;
+                        app.review_diff_files.clear();
+                    } else {
+                        app.set_status("No pending reviews for this session");
+                    }
+                }
+            }
+        }
         // Handled in run_event_loop before reaching handle_action
         AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {}
     }

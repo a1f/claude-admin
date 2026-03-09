@@ -90,6 +90,16 @@ pub enum AppAction {
         line_number: u32,
         body: String,
     },
+    OpenVimdiff {
+        base_commit: String,
+        head_commit: String,
+        file_path: String,
+    },
+    OpenDelta {
+        base_commit: String,
+        head_commit: String,
+        file_path: String,
+    },
 }
 
 pub struct App {
@@ -881,6 +891,18 @@ impl App {
                 self.review_comment_input.clear();
                 AppAction::None
             }
+            KeyCode::Char('v') => {
+                self.build_external_diff_action(|b, h, f| AppAction::OpenVimdiff {
+                    base_commit: b,
+                    head_commit: h,
+                    file_path: f,
+                })
+            }
+            KeyCode::Char('d') => self.build_external_diff_action(|b, h, f| AppAction::OpenDelta {
+                base_commit: b,
+                head_commit: h,
+                file_path: f,
+            }),
             KeyCode::Char('b') => {
                 self.view_mode = ViewMode::PlanDetail;
                 self.review = None;
@@ -891,6 +913,25 @@ impl App {
             }
             _ => AppAction::None,
         }
+    }
+
+    /// Builds an OpenVimdiff or OpenDelta action from the current review state.
+    /// Returns AppAction::None if no review is loaded or no files are available.
+    fn build_external_diff_action(
+        &self,
+        build: impl FnOnce(String, String, String) -> AppAction,
+    ) -> AppAction {
+        let Some(review) = &self.review else {
+            return AppAction::None;
+        };
+        let Some(file) = self.review_diff_files.get(self.review_file_index) else {
+            return AppAction::None;
+        };
+        build(
+            review.base_commit.clone(),
+            review.head_commit.clone(),
+            file.new_path.clone(),
+        )
     }
 
     fn handle_review_comment_key(&mut self, key: KeyEvent) -> AppAction {

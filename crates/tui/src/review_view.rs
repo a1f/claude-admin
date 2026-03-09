@@ -279,6 +279,23 @@ mod tests {
         app
     }
 
+    fn setup_review_app_with_review() -> App {
+        let mut app = setup_review_app();
+        app.review = Some(ca_lib::review::Review {
+            id: 10,
+            session_id: None,
+            project_id: None,
+            branch: "feature".to_string(),
+            base_commit: "abc123".to_string(),
+            head_commit: "def456".to_string(),
+            status: ca_lib::review::ReviewStatus::Pending,
+            round: 1,
+            created_at: 0,
+            updated_at: 0,
+        });
+        app
+    }
+
     #[test]
     fn test_draw_review_empty() {
         let backend = TestBackend::new(80, 24);
@@ -511,5 +528,70 @@ mod tests {
             hunks: vec![],
         };
         assert_eq!(display_path(&renamed), "old.rs -> new.rs");
+    }
+
+    #[test]
+    fn test_v_returns_vimdiff_action() {
+        let mut app = setup_review_app_with_review();
+        let action = app.handle_key(key(KeyCode::Char('v')));
+        match action {
+            crate::app::AppAction::OpenVimdiff {
+                base_commit,
+                head_commit,
+                file_path,
+            } => {
+                assert_eq!(base_commit, "abc123");
+                assert_eq!(head_commit, "def456");
+                assert_eq!(file_path, "src/main.rs");
+            }
+            other => panic!("Expected OpenVimdiff, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_d_returns_delta_action() {
+        let mut app = setup_review_app_with_review();
+        let action = app.handle_key(key(KeyCode::Char('d')));
+        match action {
+            crate::app::AppAction::OpenDelta {
+                base_commit,
+                head_commit,
+                file_path,
+            } => {
+                assert_eq!(base_commit, "abc123");
+                assert_eq!(head_commit, "def456");
+                assert_eq!(file_path, "src/main.rs");
+            }
+            other => panic!("Expected OpenDelta, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_v_no_review_returns_none() {
+        let mut app = setup_review_app();
+        // app has diff files but no Review loaded
+        let action = app.handle_key(key(KeyCode::Char('v')));
+        assert!(matches!(action, crate::app::AppAction::None));
+    }
+
+    #[test]
+    fn test_d_no_files_returns_none() {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Review;
+        app.review = Some(ca_lib::review::Review {
+            id: 10,
+            session_id: None,
+            project_id: None,
+            branch: "feature".to_string(),
+            base_commit: "abc123".to_string(),
+            head_commit: "def456".to_string(),
+            status: ca_lib::review::ReviewStatus::Pending,
+            round: 1,
+            created_at: 0,
+            updated_at: 0,
+        });
+        // review loaded but no diff files
+        let action = app.handle_key(key(KeyCode::Char('d')));
+        assert!(matches!(action, crate::app::AppAction::None));
     }
 }

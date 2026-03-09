@@ -88,7 +88,13 @@ async fn run_event_loop(
         if event::poll(Duration::ZERO)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    handle_action(app.handle_key(key), app, db);
+                    let action = app.handle_key(key);
+                    match &action {
+                        AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {
+                            handle_external_tool(terminal, app, db, action)?;
+                        }
+                        _ => handle_action(action, app, db),
+                    }
                 }
             }
         } else if let Some(client) = ipc_client.as_mut() {
@@ -110,6 +116,92 @@ async fn run_event_loop(
             return Ok(());
         }
     }
+}
+
+fn handle_external_tool(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    db: Option<&Database>,
+    action: AppAction,
+) -> io::Result<()> {
+    let repo_path = resolve_review_repo_path(app, db);
+    let Some(repo) = repo_path else {
+        app.set_status("No repo path found for review");
+        return Ok(());
+    };
+
+    match action {
+        AppAction::OpenVimdiff {
+            base_commit,
+            head_commit,
+            file_path,
+        } => {
+            let _ = restore_terminal();
+            let status = std::process::Command::new("git")
+                .args([
+                    "difftool",
+                    "--no-prompt",
+                    "--tool=vimdiff",
+                    &format!("{base_commit}..{head_commit}"),
+                    "--",
+                    &file_path,
+                ])
+                .current_dir(&repo)
+                .status();
+
+            enable_raw_mode()?;
+            execute!(io::stdout(), EnterAlternateScreen)?;
+            terminal.clear()?;
+
+            if let Err(e) = status {
+                app.set_status(format!("vimdiff failed: {e}"));
+            }
+        }
+        AppAction::OpenDelta {
+            base_commit,
+            head_commit,
+            file_path,
+        } => {
+            let delta_available = std::process::Command::new("which")
+                .arg("delta")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if !delta_available {
+                app.set_status("delta not found. Install: brew install git-delta");
+                return Ok(());
+            }
+
+            let _ = restore_terminal();
+
+            let git_child = std::process::Command::new("git")
+                .args([
+                    "diff",
+                    &format!("{base_commit}..{head_commit}"),
+                    "--",
+                    &file_path,
+                ])
+                .current_dir(&repo)
+                .stdout(std::process::Stdio::piped())
+                .spawn();
+
+            if let Ok(mut git_proc) = git_child {
+                if let Some(stdout) = git_proc.stdout.take() {
+                    // Pipe git diff output through delta with a pager
+                    let _ = std::process::Command::new("delta").stdin(stdout).status();
+                }
+                let _ = git_proc.wait();
+            }
+
+            enable_raw_mode()?;
+            execute!(io::stdout(), EnterAlternateScreen)?;
+            terminal.clear()?;
+        }
+        _ => {}
+    }
+
+    Ok(())
 }
 
 fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
@@ -313,6 +405,8 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 app.set_status("Comment added");
             }
         }
+        // Handled in run_event_loop before reaching handle_action
+        AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {}
     }
 }
 

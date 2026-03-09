@@ -65,6 +65,8 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("n / p", "Next/previous hunk", ""),
                 ("h / l", "Previous/next file", ""),
                 ("c", "Add comment at line", ""),
+                ("v", "Open vimdiff for file", "git difftool"),
+                ("d", "Open delta for file", "git diff | delta"),
                 ("b", "Back", ""),
             ]);
         }

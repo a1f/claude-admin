@@ -1,4 +1,5 @@
 use crate::app::{App, InputMode, ViewMode};
+use crate::command_palette::CommandPalette;
 use crate::form::FormOverlay;
 use crate::plan_view;
 use crate::project_view;
@@ -33,6 +34,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if let Some(bar) = bar_area {
         draw_command_bar(frame, app, bar);
+        if !app.command_palette.suggestions.is_empty() {
+            draw_suggestions(frame, &app.command_palette, bar);
+        }
     }
 
     if let Some(form) = &app.form_overlay {
@@ -181,6 +185,46 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
     let display = format!(":{}", app.command_palette.input.value());
     let bar = Paragraph::new(display).style(Style::default().fg(Color::White).bg(Color::DarkGray));
     frame.render_widget(bar, area);
+}
+
+fn draw_suggestions(frame: &mut Frame, palette: &CommandPalette, bar_area: Rect) {
+    let count = palette.suggestions.len().min(8) as u16;
+    if count == 0 || bar_area.y < count {
+        return;
+    }
+
+    let popup_area = Rect::new(
+        bar_area.x,
+        bar_area.y.saturating_sub(count),
+        bar_area.width.min(40),
+        count,
+    );
+
+    frame.render_widget(Clear, popup_area);
+
+    let items: Vec<ListItem> = palette
+        .suggestions
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let style = if i == palette.selected_suggestion {
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            ListItem::new(s.as_str()).style(style)
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::NONE)
+            .style(Style::default().bg(Color::Black)),
+    );
+    frame.render_widget(list, popup_area);
 }
 
 fn draw_form_overlay(frame: &mut Frame, form: &FormOverlay, area: Rect) {

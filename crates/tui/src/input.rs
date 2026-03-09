@@ -68,7 +68,6 @@ impl TextInput {
         &self.label
     }
 
-    #[allow(dead_code)]
     pub fn set_value(&mut self, s: &str) {
         self.value = s.to_string();
         self.cursor_pos = self.value.len();

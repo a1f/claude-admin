@@ -280,12 +280,26 @@ impl App {
                     AppAction::None
                 }
             }
+            KeyCode::Tab => {
+                self.command_palette.accept_suggestion();
+                AppAction::None
+            }
+            KeyCode::Up => {
+                self.command_palette.select_prev_suggestion();
+                AppAction::None
+            }
+            KeyCode::Down => {
+                self.command_palette.select_next_suggestion();
+                AppAction::None
+            }
             KeyCode::Backspace => {
                 self.command_palette.input.backspace();
+                self.command_palette.update_suggestions();
                 AppAction::None
             }
             KeyCode::Delete => {
                 self.command_palette.input.delete_char();
+                self.command_palette.update_suggestions();
                 AppAction::None
             }
             KeyCode::Left => {
@@ -306,6 +320,7 @@ impl App {
             }
             KeyCode::Char(c) => {
                 self.command_palette.input.insert_char(c);
+                self.command_palette.update_suggestions();
                 AppAction::None
             }
             _ => AppAction::None,

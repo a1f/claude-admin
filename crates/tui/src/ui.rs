@@ -1,4 +1,5 @@
 use crate::app::{App, InputMode, ViewMode};
+use crate::form::FormOverlay;
 use crate::plan_view;
 use crate::project_view;
 use ca_lib::events::EventType;
@@ -7,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -32,6 +33,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if let Some(bar) = bar_area {
         draw_command_bar(frame, app, bar);
+    }
+
+    if let Some(form) = &app.form_overlay {
+        if app.input_mode == InputMode::Form {
+            draw_form_overlay(frame, form, area);
+        }
     }
 }
 
@@ -174,4 +181,99 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
     let display = format!(":{}", app.command_palette.input.value());
     let bar = Paragraph::new(display).style(Style::default().fg(Color::White).bg(Color::DarkGray));
     frame.render_widget(bar, area);
+}
+
+fn draw_form_overlay(frame: &mut Frame, form: &FormOverlay, area: Rect) {
+    let width = area.width * 60 / 100;
+    let height = area.height * 50 / 100;
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y + (area.height - height) / 2;
+    let overlay_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, overlay_area);
+
+    let block = Block::default()
+        .title(format!(" {} ", form.title))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(overlay_area);
+    frame.render_widget(block, overlay_area);
+
+    let field_count = form.fields.len();
+    let mut constraints: Vec<Constraint> = Vec::new();
+    for _ in 0..field_count {
+        constraints.push(Constraint::Length(2));
+    }
+    if form.error_message.is_some() {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Min(0));
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints(constraints)
+        .split(inner);
+
+    for (i, field) in form.fields.iter().enumerate() {
+        let is_focused = i == form.focused_field;
+        draw_form_field(frame, field, is_focused, chunks[i]);
+    }
+
+    if let Some(err) = &form.error_message {
+        let err_idx = field_count;
+        if err_idx < chunks.len() {
+            let err_widget = Paragraph::new(err.as_str()).style(Style::default().fg(Color::Red));
+            frame.render_widget(err_widget, chunks[err_idx]);
+        }
+    }
+}
+
+fn draw_form_field(
+    frame: &mut Frame,
+    field: &crate::form::FormField,
+    is_focused: bool,
+    area: Rect,
+) {
+    if area.height < 2 {
+        return;
+    }
+
+    let label_style = if is_focused {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let required_marker = if field.required { " *" } else { "" };
+    let label = format!("{}{}", field.input.label(), required_marker);
+
+    let input_style = if is_focused {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let field_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(area);
+
+    let label_widget = Paragraph::new(label).style(label_style);
+    frame.render_widget(label_widget, field_chunks[0]);
+
+    let border_style = if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let display = field.input.value().to_string();
+    let input_widget = Paragraph::new(display).style(input_style).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(border_style),
+    );
+    frame.render_widget(input_widget, field_chunks[1]);
 }

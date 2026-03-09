@@ -1,4 +1,5 @@
 use crate::command_palette::CommandPalette;
+use crate::form::FormOverlay;
 use ca_lib::events::Event;
 use ca_lib::models::Session;
 use ca_lib::plan::{Plan, Step, StepStatus};
@@ -9,7 +10,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 pub enum InputMode {
     Normal,
     Command,
-    #[allow(dead_code)]
     Form,
     #[allow(dead_code)]
     Help,
@@ -48,6 +48,7 @@ pub enum AppAction {
     },
     AttachSession(String),
     ExecuteCommand(String),
+    SubmitForm,
 }
 
 pub struct App {
@@ -67,6 +68,7 @@ pub struct App {
     pub orch_panel: OrchPanel,
     pub orch_session_index: usize,
     pub command_palette: CommandPalette,
+    pub form_overlay: Option<FormOverlay>,
 }
 
 impl App {
@@ -88,6 +90,7 @@ impl App {
             orch_panel: OrchPanel::Steps,
             orch_session_index: 0,
             command_palette: CommandPalette::new(),
+            form_overlay: None,
         }
     }
 
@@ -187,6 +190,7 @@ impl App {
         if self.input_mode != InputMode::Normal {
             return match self.input_mode {
                 InputMode::Command => self.handle_command_key(key),
+                InputMode::Form => self.handle_form_key(key),
                 _ => {
                     if key.code == KeyCode::Esc {
                         self.input_mode = InputMode::Normal;
@@ -260,6 +264,87 @@ impl App {
             }
             KeyCode::Char(c) => {
                 self.command_palette.input.insert_char(c);
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_form_key(&mut self, key: KeyEvent) -> AppAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.form_overlay = None;
+                self.input_mode = InputMode::Normal;
+                AppAction::None
+            }
+            KeyCode::Tab => {
+                if let Some(form) = &mut self.form_overlay {
+                    form.focus_next();
+                }
+                AppAction::None
+            }
+            KeyCode::BackTab => {
+                if let Some(form) = &mut self.form_overlay {
+                    form.focus_prev();
+                }
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                if let Some(form) = &self.form_overlay {
+                    match form.validate() {
+                        Ok(()) => {
+                            self.input_mode = InputMode::Normal;
+                            AppAction::SubmitForm
+                        }
+                        Err(msg) => {
+                            if let Some(form) = &mut self.form_overlay {
+                                form.error_message = Some(msg);
+                            }
+                            AppAction::None
+                        }
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(form) = &mut self.form_overlay {
+                    if let Some(input) = form.focused_input() {
+                        input.backspace();
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Delete => {
+                if let Some(form) = &mut self.form_overlay {
+                    if let Some(input) = form.focused_input() {
+                        input.delete_char();
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Left => {
+                if let Some(form) = &mut self.form_overlay {
+                    if let Some(input) = form.focused_input() {
+                        input.move_left();
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Right => {
+                if let Some(form) = &mut self.form_overlay {
+                    if let Some(input) = form.focused_input() {
+                        input.move_right();
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Char(c) => {
+                if let Some(form) = &mut self.form_overlay {
+                    if let Some(input) = form.focused_input() {
+                        input.insert_char(c);
+                    }
+                }
                 AppAction::None
             }
             _ => AppAction::None,
@@ -1386,5 +1471,66 @@ mod tests {
         app.handle_key(key(KeyCode::Char('b')));
         app.handle_key(key(KeyCode::Backspace));
         assert_eq!(app.command_palette.input.value(), "a");
+    }
+
+    // -- Form overlay tests --
+
+    #[test]
+    fn test_form_mode_esc_cancels() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Form;
+        app.form_overlay = Some(FormOverlay::new_workspace());
+        let action = app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.form_overlay.is_none());
+        assert!(matches!(action, AppAction::None));
+    }
+
+    #[test]
+    fn test_form_mode_tab_cycles_fields() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Form;
+        app.form_overlay = Some(FormOverlay::new_workspace());
+        assert_eq!(app.form_overlay.as_ref().unwrap().focused_field, 0);
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.form_overlay.as_ref().unwrap().focused_field, 1);
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.form_overlay.as_ref().unwrap().focused_field, 0);
+    }
+
+    #[test]
+    fn test_form_mode_submit_empty_required_shows_error() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Form;
+        app.form_overlay = Some(FormOverlay::new_workspace());
+        let action = app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(action, AppAction::None));
+        assert_eq!(app.input_mode, InputMode::Form);
+        assert!(app.form_overlay.as_ref().unwrap().error_message.is_some());
+    }
+
+    #[test]
+    fn test_form_mode_submit_valid_returns_submit_form() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Form;
+        let mut form = FormOverlay::new_workspace();
+        form.fields[0].input.set_value("/home/user/project");
+        app.form_overlay = Some(form);
+        let action = app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(action, AppAction::SubmitForm));
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_form_mode_typing_goes_to_focused_field() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Form;
+        app.form_overlay = Some(FormOverlay::new_workspace());
+        app.handle_key(key(KeyCode::Char('/')));
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(
+            app.form_overlay.as_ref().unwrap().fields[0].input.value(),
+            "/d"
+        );
     }
 }

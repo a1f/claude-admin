@@ -2,7 +2,6 @@
 pub struct TextInput {
     value: String,
     cursor_pos: usize,
-    #[allow(dead_code)]
     label: String,
 }
 
@@ -65,7 +64,6 @@ impl TextInput {
         self.cursor_pos
     }
 
-    #[allow(dead_code)]
     pub fn label(&self) -> &str {
         &self.label
     }

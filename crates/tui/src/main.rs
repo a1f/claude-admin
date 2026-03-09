@@ -1,5 +1,6 @@
 mod app;
 mod command_palette;
+mod form;
 mod input;
 mod plan_view;
 mod project_view;
@@ -166,6 +167,9 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         }
         AppAction::ExecuteCommand(_cmd) => {
             // Command execution will be wired in M2.5 (command parser)
+        }
+        AppAction::SubmitForm => {
+            // Will be wired in M2.4
         }
     }
 }

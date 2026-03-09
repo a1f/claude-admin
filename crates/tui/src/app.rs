@@ -808,6 +808,23 @@ impl App {
             }
         }
     }
+
+    /// Returns counts of sessions by state: (working, needs_input, done, idle)
+    pub fn session_state_counts(&self) -> (usize, usize, usize, usize) {
+        let mut working = 0;
+        let mut needs_input = 0;
+        let mut done = 0;
+        let mut idle = 0;
+        for s in &self.sessions {
+            match s.state {
+                SessionState::Working => working += 1,
+                SessionState::NeedsInput => needs_input += 1,
+                SessionState::Done => done += 1,
+                SessionState::Idle => idle += 1,
+            }
+        }
+        (working, needs_input, done, idle)
+    }
 }
 
 fn wrap_index(current: usize, total: usize, direction: isize) -> usize {
@@ -2386,5 +2403,59 @@ mod tests {
                 mode
             );
         }
+    }
+
+    #[test]
+    fn test_session_state_counts_empty() {
+        let app = App::new();
+        assert_eq!(app.session_state_counts(), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn test_session_state_counts_mixed() {
+        let mut app = App::new();
+        let mut s1 = make_session("s1");
+        s1.state = SessionState::Working;
+        let mut s2 = make_session("s2");
+        s2.state = SessionState::NeedsInput;
+        let mut s3 = make_session("s3");
+        s3.state = SessionState::Done;
+        let s4 = make_session("s4"); // default Idle
+        app.update_sessions(vec![s1, s2, s3, s4]);
+        assert_eq!(app.session_state_counts(), (1, 1, 1, 1));
+    }
+
+    #[test]
+    fn test_session_state_counts_all_one_state() {
+        let mut app = App::new();
+        let mut s1 = make_session("s1");
+        s1.state = SessionState::Working;
+        let mut s2 = make_session("s2");
+        s2.state = SessionState::Working;
+        let mut s3 = make_session("s3");
+        s3.state = SessionState::Working;
+        app.update_sessions(vec![s1, s2, s3]);
+        assert_eq!(app.session_state_counts(), (3, 0, 0, 0));
+    }
+
+    #[test]
+    fn test_session_state_counts_includes_all_sessions() {
+        let mut app = App::new();
+        let mut s1 = make_session("s1");
+        s1.state = SessionState::Working;
+        s1.project_id = Some(1);
+        let mut s2 = make_session("s2");
+        s2.state = SessionState::NeedsInput;
+        // s2 has no project_id, so it would be "untracked"
+        let mut s3 = make_session("s3");
+        s3.state = SessionState::Working;
+        s3.project_id = Some(2);
+        app.update_sessions(vec![s1, s2, s3]);
+
+        // Counts should include ALL sessions regardless of filter mode
+        app.show_untracked = false;
+        assert_eq!(app.session_state_counts(), (2, 1, 0, 0));
+        app.show_untracked = true;
+        assert_eq!(app.session_state_counts(), (2, 1, 0, 0));
     }
 }

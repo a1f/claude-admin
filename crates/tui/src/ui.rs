@@ -203,6 +203,40 @@ fn state_color(state: &SessionState) -> Color {
     }
 }
 
+fn build_state_counts(app: &App) -> Vec<Span<'_>> {
+    let (working, needs_input, done, _idle) = app.session_state_counts();
+    let mut parts: Vec<Span> = Vec::new();
+
+    if working > 0 {
+        parts.push(Span::styled(
+            format!("{working} working"),
+            Style::default().fg(Color::Green),
+        ));
+    }
+    if needs_input > 0 {
+        if !parts.is_empty() {
+            parts.push(Span::raw(" | "));
+        }
+        parts.push(Span::styled(
+            format!("{needs_input} needs input"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if done > 0 {
+        if !parts.is_empty() {
+            parts.push(Span::raw(" | "));
+        }
+        parts.push(Span::styled(
+            format!("{done} done"),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    parts
+}
+
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let right_msg = if let Some(msg) = &app.command_palette.message {
         msg.clone()
@@ -229,10 +263,27 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let available = area.width as usize;
     let left_len = left_hints.len() + 1;
     let right_len = right_msg.len() + 1;
-    let filler_len = available.saturating_sub(left_len + right_len);
-    let filler = " ".repeat(filler_len);
 
-    let line = Line::from(vec![left, Span::raw(filler), right]);
+    let center_spans = build_state_counts(app);
+    let center_text_len: usize = center_spans.iter().map(|s| s.content.len()).sum();
+
+    let mut spans = vec![left];
+    if center_text_len > 0 {
+        spans.push(Span::raw("  "));
+    }
+    spans.extend(center_spans);
+    let used = left_len
+        + (if center_text_len > 0 {
+            2 + center_text_len
+        } else {
+            0
+        })
+        + right_len;
+    let filler_len = available.saturating_sub(used);
+    spans.push(Span::raw(" ".repeat(filler_len)));
+    spans.push(right);
+
+    let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
     frame.render_widget(bar, area);
 }

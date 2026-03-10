@@ -1,6 +1,9 @@
 use crate::db::{Database, DbError};
+use crate::tmux::{TmuxError, TmuxPane};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteHost {
@@ -11,6 +14,12 @@ pub struct RemoteHost {
     pub key_path: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+impl fmt::Display for RemoteHost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}:{}", self.user, self.hostname, self.port)
+    }
 }
 
 fn row_to_remote_host(row: &rusqlite::Row) -> rusqlite::Result<RemoteHost> {
@@ -144,8 +153,136 @@ pub fn test_ssh_connection(host: &RemoteHost) -> Result<bool, std::io::Error> {
     Ok(output.status.success())
 }
 
+// --- SSH-based tmux operations ---
+
+/// Build SSH argument list for a remote host.
+/// Separated from Command construction to make unit testing straightforward.
+pub(crate) fn ssh_args(host: &RemoteHost) -> Vec<String> {
+    let mut args = vec![
+        "-o".to_string(),
+        "ConnectTimeout=10".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-o".to_string(),
+        "StrictHostKeyChecking=accept-new".to_string(),
+    ];
+    if let Some(key) = &host.key_path {
+        args.push("-i".to_string());
+        args.push(key.clone());
+    }
+    args.push("-p".to_string());
+    args.push(host.port.to_string());
+    args.push(format!("{}@{}", host.user, host.hostname));
+    args
+}
+
+fn build_ssh_command(host: &RemoteHost) -> Command {
+    let mut cmd = Command::new("ssh");
+    for arg in ssh_args(host) {
+        cmd.arg(arg);
+    }
+    cmd
+}
+
+/// List all tmux panes on a remote host.
+pub fn list_remote_panes(host: &RemoteHost) -> Result<Vec<TmuxPane>, TmuxError> {
+    let pane_format =
+        "#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_id}\t#{pane_current_path}";
+    let mut cmd = build_ssh_command(host);
+    cmd.args(["tmux", "list-panes", "-a", "-F", pane_format]);
+
+    let output = cmd.output().map_err(TmuxError::Io)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("no server running") || stderr.contains("no sessions") {
+            return Err(TmuxError::NotRunning);
+        }
+        return Err(TmuxError::CommandFailed(stderr.into_owned()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    crate::tmux::parse_pane_list(&stdout)
+}
+
+/// Capture pane content from a remote tmux pane.
+pub fn capture_remote_pane(
+    host: &RemoteHost,
+    pane_id: &str,
+    lines: u32,
+) -> Result<String, TmuxError> {
+    if lines == 0 {
+        return Ok(String::new());
+    }
+
+    let start_line = format!("-{}", lines);
+    let mut cmd = build_ssh_command(host);
+    cmd.args([
+        "tmux",
+        "capture-pane",
+        "-p",
+        "-t",
+        pane_id,
+        "-S",
+        &start_line,
+    ]);
+
+    let output = cmd.output().map_err(TmuxError::Io)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("can't find pane") || stderr.contains("no such") {
+            return Err(TmuxError::PaneNotFound(pane_id.to_string()));
+        }
+        return Err(TmuxError::CommandFailed(stderr.into_owned()));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Send keys to a remote tmux pane.
+pub fn send_remote_keys(host: &RemoteHost, pane_id: &str, keys: &str) -> Result<(), TmuxError> {
+    let mut cmd = build_ssh_command(host);
+    cmd.args(["tmux", "send-keys", "-t", pane_id, keys, "Enter"]);
+
+    let output = cmd.output().map_err(TmuxError::Io)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(TmuxError::CommandFailed(stderr.into_owned()));
+    }
+
+    Ok(())
+}
+
+/// Get the current process running in a remote tmux pane.
+pub fn get_remote_pane_process(host: &RemoteHost, pane_id: &str) -> Result<String, TmuxError> {
+    let mut cmd = build_ssh_command(host);
+    cmd.args([
+        "tmux",
+        "list-panes",
+        "-t",
+        pane_id,
+        "-F",
+        "#{pane_current_command}",
+    ]);
+
+    let output = cmd.output().map_err(TmuxError::Io)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("can't find pane") || stderr.contains("no such") {
+            return Err(TmuxError::PaneNotFound(pane_id.to_string()));
+        }
+        return Err(TmuxError::CommandFailed(stderr.into_owned()));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::db::Database;
     use tempfile::tempdir;
 
@@ -296,5 +433,109 @@ mod tests {
         db.set_workspace_host(ws.id, None).unwrap();
         let cleared = db.get_workspace(ws.id).unwrap().unwrap();
         assert!(cleared.host_id.is_none());
+    }
+
+    fn make_host(hostname: &str, user: &str, port: u16, key_path: Option<&str>) -> RemoteHost {
+        RemoteHost {
+            id: 1,
+            hostname: hostname.to_string(),
+            user: user.to_string(),
+            port,
+            key_path: key_path.map(String::from),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_ssh_args_basic() {
+        let host = make_host("server.example.com", "deploy", 22, None);
+        let args = ssh_args(&host);
+
+        assert!(args.contains(&"-o".to_string()));
+        assert!(args.contains(&"BatchMode=yes".to_string()));
+        assert!(args.contains(&"deploy@server.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_ssh_args_with_key() {
+        let host = make_host("s.example.com", "u", 22, Some("/keys/id_ed25519"));
+        let args = ssh_args(&host);
+
+        let key_idx = args.iter().position(|a| a == "-i").unwrap();
+        assert_eq!(args[key_idx + 1], "/keys/id_ed25519");
+    }
+
+    #[test]
+    fn test_ssh_args_custom_port() {
+        let host = make_host("s.example.com", "u", 2222, None);
+        let args = ssh_args(&host);
+
+        let port_idx = args.iter().position(|a| a == "-p").unwrap();
+        assert_eq!(args[port_idx + 1], "2222");
+    }
+
+    #[test]
+    fn test_ssh_args_default_port() {
+        let host = make_host("s.example.com", "u", 22, None);
+        let args = ssh_args(&host);
+
+        let port_idx = args.iter().position(|a| a == "-p").unwrap();
+        assert_eq!(args[port_idx + 1], "22");
+    }
+
+    #[test]
+    fn test_ssh_timeout_options() {
+        let host = make_host("s.example.com", "u", 22, None);
+        let args = ssh_args(&host);
+
+        assert!(args.contains(&"ConnectTimeout=10".to_string()));
+    }
+
+    #[test]
+    fn test_ssh_strict_host_key_checking() {
+        let host = make_host("s.example.com", "u", 22, None);
+        let args = ssh_args(&host);
+
+        assert!(args.contains(&"StrictHostKeyChecking=accept-new".to_string()));
+    }
+
+    #[test]
+    fn test_capture_remote_pane_zero_lines() {
+        let host = make_host("s.example.com", "u", 22, None);
+        let result = capture_remote_pane(&host, "%0", 0).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_remote_host_display_format() {
+        let host = make_host("server.example.com", "deploy", 22, None);
+        assert_eq!(host.to_string(), "deploy@server.example.com:22");
+    }
+
+    #[test]
+    fn test_remote_host_display_custom_port() {
+        let host = make_host("db.internal", "admin", 2222, None);
+        assert_eq!(host.to_string(), "admin@db.internal:2222");
+    }
+
+    #[test]
+    fn test_parse_pane_list_reuse_from_remote_context() {
+        let output = "work\t0\t0\t%10\t/remote/project\nwork\t1\t0\t%11\t/remote/other\n";
+        let panes = crate::tmux::parse_pane_list(output).unwrap();
+
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].session_name, "work");
+        assert_eq!(panes[0].pane_id, "%10");
+        assert_eq!(panes[0].working_dir, "/remote/project");
+        assert_eq!(panes[1].pane_id, "%11");
+    }
+
+    #[test]
+    fn test_ssh_args_no_key_omits_i_flag() {
+        let host = make_host("s.example.com", "u", 22, None);
+        let args = ssh_args(&host);
+
+        assert!(!args.contains(&"-i".to_string()));
     }
 }

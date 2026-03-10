@@ -96,7 +96,7 @@ pub fn list_all_panes() -> Result<Vec<TmuxPane>, TmuxError> {
     parse_pane_list(&stdout)
 }
 
-fn parse_pane_list(output: &str) -> Result<Vec<TmuxPane>, TmuxError> {
+pub fn parse_pane_list(output: &str) -> Result<Vec<TmuxPane>, TmuxError> {
     let mut panes = Vec::new();
 
     for line in output.lines() {

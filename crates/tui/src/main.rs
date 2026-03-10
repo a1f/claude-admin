@@ -2,6 +2,7 @@ mod app;
 mod command_palette;
 mod commands;
 mod form;
+mod git_view;
 mod help;
 mod input;
 mod plan_view;
@@ -428,6 +429,37 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                         app.set_status("No pending reviews for this session");
                     }
                 }
+            }
+        }
+        AppAction::LoadGitStack(repo_path) => {
+            match ca_lib::git_ops::git_commit_stack(std::path::Path::new(&repo_path), None) {
+                Ok(commits) => {
+                    app.git_commits = commits;
+                    app.git_commit_index = 0;
+                    app.git_diff_files.clear();
+                    app.git_scroll = 0;
+                    app.git_file_index = 0;
+                    app.view_mode = app::ViewMode::Git;
+                }
+                Err(e) => app.set_status(format!("Git error: {e}")),
+            }
+        }
+        AppAction::LoadCommitDiff { repo_path, commit } => {
+            let path = if repo_path.is_empty() {
+                // Fallback: try selected session working dir
+                app.selected_session()
+                    .map(|s| s.working_dir.clone())
+                    .unwrap_or_default()
+            } else {
+                repo_path
+            };
+            match ca_lib::git_ops::git_show(std::path::Path::new(&path), &commit) {
+                Ok(files) => {
+                    app.git_diff_files = files;
+                    app.git_scroll = 0;
+                    app.git_file_index = 0;
+                }
+                Err(e) => app.set_status(format!("Diff error: {e}")),
             }
         }
         // Handled in run_event_loop before reaching handle_action

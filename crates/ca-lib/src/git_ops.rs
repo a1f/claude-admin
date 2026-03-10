@@ -322,6 +322,43 @@ pub fn git_show(repo_path: &Path, commit: &str) -> Result<Vec<DiffFile>, GitErro
     Ok(parse_diff(&stdout))
 }
 
+/// Get commits in a range (e.g., "abc123..HEAD").
+pub fn git_log_range(repo_path: &Path, range: &str) -> Result<Vec<CommitInfo>, GitError> {
+    let stdout = run_git(repo_path, &["log", "--format=%H%n%h%n%an%n%ai%n%s", range])?;
+    Ok(parse_log_output(&stdout))
+}
+
+/// Get the commit stack for the current branch -- commits since diverging from base.
+/// If base is None, tries "main" then "master" as the base branch.
+pub fn git_commit_stack(repo_path: &Path, base: Option<&str>) -> Result<Vec<CommitInfo>, GitError> {
+    let base_branch = match base {
+        Some(b) => b.to_string(),
+        None => detect_base_branch(repo_path)?,
+    };
+
+    let merge_base_output = run_git(repo_path, &["merge-base", &base_branch, "HEAD"])?;
+    let merge_base = merge_base_output.trim();
+
+    if merge_base.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let range = format!("{merge_base}..HEAD");
+    git_log_range(repo_path, &range)
+}
+
+fn detect_base_branch(repo_path: &Path) -> Result<String, GitError> {
+    if run_git(repo_path, &["rev-parse", "--verify", "main"]).is_ok() {
+        return Ok("main".to_string());
+    }
+    if run_git(repo_path, &["rev-parse", "--verify", "master"]).is_ok() {
+        return Ok("master".to_string());
+    }
+    Err(GitError::CommandFailed(
+        "no main or master branch found".to_string(),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -627,6 +664,105 @@ diff --git a/num.rs b/num.rs
         assert!(!commits[0].short_hash.is_empty());
         assert!(!commits[0].author.is_empty());
         assert!(!commits[0].date.is_empty());
+    }
+
+    #[test]
+    fn test_parse_log_output_multiple_commits() {
+        let output = "\
+abc123full\n\
+abc123\n\
+Alice\n\
+2025-01-01 10:00:00 +0000\n\
+First commit\n\
+def456full\n\
+def456\n\
+Bob\n\
+2025-01-02 11:00:00 +0000\n\
+Second commit";
+        let commits = parse_log_output(output);
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].hash, "abc123full");
+        assert_eq!(commits[0].short_hash, "abc123");
+        assert_eq!(commits[0].author, "Alice");
+        assert_eq!(commits[0].message, "First commit");
+        assert_eq!(commits[1].hash, "def456full");
+        assert_eq!(commits[1].short_hash, "def456");
+        assert_eq!(commits[1].author, "Bob");
+        assert_eq!(commits[1].message, "Second commit");
+    }
+
+    #[test]
+    fn test_git_show_diff_parses() {
+        let (_dir, repo_path) = create_temp_git_repo();
+
+        std::fs::write(repo_path.join("show_test.txt"), "line1\nline2\n").unwrap();
+        Command::new("git")
+            .args(["-C", repo_path.to_str().unwrap(), "add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-C",
+                repo_path.to_str().unwrap(),
+                "commit",
+                "-m",
+                "add show_test",
+            ])
+            .output()
+            .unwrap();
+
+        let files = git_show(&repo_path, "HEAD").unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].new_path, "show_test.txt");
+        assert!(!files[0].hunks.is_empty());
+
+        let added_lines: Vec<_> = files[0].hunks[0]
+            .lines
+            .iter()
+            .filter(|l| l.kind == DiffLineKind::Added)
+            .collect();
+        assert_eq!(added_lines.len(), 2);
+    }
+
+    #[test]
+    fn test_git_commit_stack_on_same_branch() {
+        let (_dir, repo_path) = create_temp_git_repo();
+
+        // We're on main (the default branch created by init)
+        // No commits since divergence from self, so stack should be empty
+        let commits = git_commit_stack(&repo_path, Some("HEAD")).unwrap();
+        assert!(commits.is_empty());
+    }
+
+    #[test]
+    fn test_git_log_range() {
+        let (_dir, repo_path) = create_temp_git_repo();
+
+        // Get initial commit hash
+        let initial = run_git(&repo_path, &["rev-parse", "HEAD"]).unwrap();
+        let initial = initial.trim();
+
+        // Add a second commit
+        std::fs::write(repo_path.join("range_test.txt"), "content").unwrap();
+        Command::new("git")
+            .args(["-C", repo_path.to_str().unwrap(), "add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-C",
+                repo_path.to_str().unwrap(),
+                "commit",
+                "-m",
+                "range commit",
+            ])
+            .output()
+            .unwrap();
+
+        let range = format!("{initial}..HEAD");
+        let commits = git_log_range(&repo_path, &range).unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].message, "range commit");
     }
 
     #[test]

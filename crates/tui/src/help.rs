@@ -19,6 +19,7 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("Tab / n", "Next needs-input session", ""),
                 ("p", "Switch to Projects view", "ca project list"),
                 ("r", "Open review for session", ""),
+                ("g", "Git commit stack", "git log"),
                 ("i", "Toggle untracked filter", ""),
                 ("N", "Create workspace", "ca workspace add <path>"),
             ]);
@@ -72,6 +73,15 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("b", "Back", ""),
             ]);
         }
+        ViewMode::Git => {
+            entries.extend([
+                ("j / k", "Navigate commits", ""),
+                ("Enter", "Show commit diff", "git show"),
+                ("n / p", "Scroll diff", ""),
+                ("h / l", "Previous/next file", ""),
+                ("b", "Back to Sessions", ""),
+            ]);
+        }
     }
 
     entries
@@ -122,6 +132,22 @@ mod tests {
     }
 
     #[test]
+    fn test_help_content_git_not_empty() {
+        let content = help_content(ViewMode::Git);
+        assert!(!content.is_empty());
+        assert!(
+            content
+                .iter()
+                .any(|(_, action, _)| *action == "Navigate commits")
+        );
+        assert!(
+            content
+                .iter()
+                .any(|(_, action, _)| *action == "Show commit diff")
+        );
+    }
+
+    #[test]
     fn test_all_views_have_global_keys() {
         for mode in [
             ViewMode::Sessions,
@@ -130,6 +156,7 @@ mod tests {
             ViewMode::PlanDetail,
             ViewMode::Orchestrator,
             ViewMode::Review,
+            ViewMode::Git,
         ] {
             let content = help_content(mode);
             assert!(

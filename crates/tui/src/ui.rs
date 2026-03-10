@@ -1,6 +1,7 @@
 use crate::app::{App, InputMode, ViewMode};
 use crate::command_palette::CommandPalette;
 use crate::form::FormOverlay;
+use crate::git_view;
 use crate::plan_view;
 use crate::project_view;
 use crate::review_view;
@@ -32,6 +33,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ViewMode::PlanDetail => plan_view::draw_plan_detail(frame, app, main_area),
         ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app, main_area),
         ViewMode::Review => review_view::draw_review(frame, app, main_area),
+        ViewMode::Git => git_view::draw_git(frame, app, main_area),
     }
 
     if app.input_mode == InputMode::Command {
@@ -301,6 +303,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::PlanDetail => "s:status o:orch b:back ?:help",
         ViewMode::Orchestrator => "Tab:panel s:spawn a:attach b:back ?:help",
         ViewMode::Review => "j/k:scroll n/p:hunk h/l:file c:comment b:back ?:help",
+        ViewMode::Git => "j/k:commits Enter:diff n/p:scroll h/l:file b:back ?:help",
     };
 
     let left = Span::styled(
@@ -498,6 +501,7 @@ fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::PlanDetail => "Plan Detail",
         ViewMode::Orchestrator => "Orchestrator",
         ViewMode::Review => "Review",
+        ViewMode::Git => "Git",
     };
 
     let block = Block::default()

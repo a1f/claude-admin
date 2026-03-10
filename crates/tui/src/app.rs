@@ -1,7 +1,7 @@
 use crate::command_palette::CommandPalette;
 use crate::form::{FormKind, FormOverlay};
 use ca_lib::events::Event;
-use ca_lib::git_ops::DiffFile;
+use ca_lib::git_ops::{CommitInfo, DiffFile};
 use ca_lib::models::{Session, SessionState};
 use ca_lib::plan::{Plan, Step, StepStatus};
 use ca_lib::project::Project;
@@ -26,6 +26,7 @@ pub enum ViewMode {
     PlanDetail,
     Orchestrator,
     Review,
+    Git,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +106,11 @@ pub enum AppAction {
         session_id: String,
     },
     OpenSessionReview(String),
+    LoadGitStack(String),
+    LoadCommitDiff {
+        repo_path: String,
+        commit: String,
+    },
 }
 
 pub struct App {
@@ -140,6 +146,11 @@ pub struct App {
     pub review_comment_mode: bool,
     pub review_comment_input: crate::input::TextInput,
     pub review_comment_line: Option<u32>,
+    pub git_commits: Vec<CommitInfo>,
+    pub git_commit_index: usize,
+    pub git_diff_files: Vec<DiffFile>,
+    pub git_scroll: u16,
+    pub git_file_index: usize,
 }
 
 impl App {
@@ -177,6 +188,11 @@ impl App {
             review_comment_mode: false,
             review_comment_input: crate::input::TextInput::new("Comment"),
             review_comment_line: None,
+            git_commits: Vec::new(),
+            git_commit_index: 0,
+            git_diff_files: Vec::new(),
+            git_scroll: 0,
+            git_file_index: 0,
         }
     }
 
@@ -388,6 +404,7 @@ impl App {
                 ViewMode::PlanDetail => self.handle_plan_detail_key(key.code),
                 ViewMode::Orchestrator => self.handle_orchestrator_key(key.code),
                 ViewMode::Review => self.handle_review_key(key),
+                ViewMode::Git => self.handle_git_key(key.code),
             },
         }
     }
@@ -604,6 +621,13 @@ impl App {
             KeyCode::Char('r') => {
                 if let Some(session) = self.selected_session() {
                     AppAction::OpenSessionReview(session.id.clone())
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('g') => {
+                if let Some(session) = self.selected_session() {
+                    AppAction::LoadGitStack(session.working_dir.clone())
                 } else {
                     AppAction::None
                 }
@@ -956,6 +980,69 @@ impl App {
             review.head_commit.clone(),
             file.new_path.clone(),
         )
+    }
+
+    fn handle_git_key(&mut self, code: KeyCode) -> AppAction {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.git_commits.is_empty()
+                    && self.git_commit_index < self.git_commits.len() - 1
+                {
+                    self.git_commit_index += 1;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if self.git_commit_index > 0 {
+                    self.git_commit_index -= 1;
+                }
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                if let Some(commit) = self.git_commits.get(self.git_commit_index) {
+                    // Derive repo path from first session's working dir
+                    let repo_path = self
+                        .selected_session()
+                        .map(|s| s.working_dir.clone())
+                        .unwrap_or_default();
+                    AppAction::LoadCommitDiff {
+                        repo_path,
+                        commit: commit.hash.clone(),
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('n') => {
+                self.git_scroll = self.git_scroll.saturating_add(1);
+                AppAction::None
+            }
+            KeyCode::Char('p') => {
+                self.git_scroll = self.git_scroll.saturating_sub(1);
+                AppAction::None
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if self.git_file_index > 0 {
+                    self.git_file_index -= 1;
+                    self.git_scroll = 0;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if !self.git_diff_files.is_empty()
+                    && self.git_file_index < self.git_diff_files.len() - 1
+                {
+                    self.git_file_index += 1;
+                    self.git_scroll = 0;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::Sessions;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
     }
 
     fn handle_review_comment_key(&mut self, key: KeyEvent) -> AppAction {
@@ -2828,5 +2915,114 @@ mod tests {
                 }
             }
         }
+    }
+
+    // -- Git view tests --
+
+    fn make_commit_info(hash: &str, msg: &str) -> ca_lib::git_ops::CommitInfo {
+        ca_lib::git_ops::CommitInfo {
+            hash: hash.to_string(),
+            short_hash: hash[..7.min(hash.len())].to_string(),
+            author: "Test".to_string(),
+            date: "2025-01-01".to_string(),
+            message: msg.to_string(),
+        }
+    }
+
+    fn setup_git_app() -> App {
+        let mut app = App::new();
+        app.view_mode = ViewMode::Git;
+        app.git_commits = vec![
+            make_commit_info("aaa1111", "First commit"),
+            make_commit_info("bbb2222", "Second commit"),
+            make_commit_info("ccc3333", "Third commit"),
+        ];
+        app
+    }
+
+    #[test]
+    fn test_g_opens_git_view() {
+        let mut app = App::new();
+        app.update_sessions(vec![make_session("s1")]);
+        app.selected_index = 0;
+        let action = app.handle_key(key(KeyCode::Char('g')));
+        match action {
+            AppAction::LoadGitStack(path) => {
+                assert_eq!(path, "/home/user");
+            }
+            other => panic!("Expected LoadGitStack, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_navigate_git_commits() {
+        let mut app = setup_git_app();
+        assert_eq!(app.git_commit_index, 0);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.git_commit_index, 1);
+
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.git_commit_index, 2);
+
+        // At last commit, should not go further
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.git_commit_index, 2);
+
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.git_commit_index, 1);
+
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.git_commit_index, 0);
+
+        // At first commit, should stay
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.git_commit_index, 0);
+    }
+
+    #[test]
+    fn test_enter_loads_commit_diff() {
+        let mut app = setup_git_app();
+        app.update_sessions(vec![make_session("s1")]);
+        app.selected_index = 0;
+        app.git_commit_index = 1;
+        let action = app.handle_key(key(KeyCode::Enter));
+        match action {
+            AppAction::LoadCommitDiff { commit, .. } => {
+                assert_eq!(commit, "bbb2222");
+            }
+            other => panic!("Expected LoadCommitDiff, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_back_returns_to_sessions() {
+        let mut app = setup_git_app();
+        assert_eq!(app.view_mode, ViewMode::Git);
+
+        app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.view_mode, ViewMode::Sessions);
+    }
+
+    #[test]
+    fn test_git_scroll() {
+        let mut app = setup_git_app();
+        assert_eq!(app.git_scroll, 0);
+
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.git_scroll, 1);
+
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.git_scroll, 2);
+
+        app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.git_scroll, 1);
+
+        app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.git_scroll, 0);
+
+        // Should not go below 0
+        app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.git_scroll, 0);
     }
 }

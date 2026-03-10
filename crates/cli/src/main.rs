@@ -1613,6 +1613,7 @@ mod tests {
             path: "/home/user/myapp".to_string(),
             created_at: 1706400000,
             updated_at: 1706500000,
+            host_id: None,
         }];
         let table = format_workspaces_table(&workspaces);
         assert!(table.contains("ID"));

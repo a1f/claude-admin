@@ -11,6 +11,7 @@ pub struct Workspace {
     pub path: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub host_id: Option<i64>,
 }
 
 fn row_to_workspace(row: &rusqlite::Row) -> rusqlite::Result<Workspace> {
@@ -20,6 +21,7 @@ fn row_to_workspace(row: &rusqlite::Row) -> rusqlite::Result<Workspace> {
         path: row.get(2)?,
         created_at: row.get(3)?,
         updated_at: row.get(4)?,
+        host_id: row.get(5)?,
     })
 }
 
@@ -54,6 +56,7 @@ impl Database {
             path: path.to_string(),
             created_at: now,
             updated_at: now,
+            host_id: None,
         })
     }
 
@@ -62,7 +65,7 @@ impl Database {
             .connection()
             .query_row(
                 r#"
-                SELECT id, name, path, created_at, updated_at
+                SELECT id, name, path, created_at, updated_at, host_id
                 FROM workspaces WHERE id = ?1
                 "#,
                 params![id],
@@ -78,7 +81,7 @@ impl Database {
             .connection()
             .query_row(
                 r#"
-                SELECT id, name, path, created_at, updated_at
+                SELECT id, name, path, created_at, updated_at, host_id
                 FROM workspaces WHERE path = ?1
                 "#,
                 params![path],
@@ -92,7 +95,7 @@ impl Database {
     pub fn list_workspaces(&self) -> Result<Vec<Workspace>, DbError> {
         let mut stmt = self.connection().prepare(
             r#"
-            SELECT id, name, path, created_at, updated_at
+            SELECT id, name, path, created_at, updated_at, host_id
             FROM workspaces
             ORDER BY created_at DESC, id DESC
             "#,
@@ -112,6 +115,28 @@ impl Database {
             .connection()
             .execute("DELETE FROM workspaces WHERE id = ?1", params![id])?;
         Ok(rows_affected > 0)
+    }
+
+    pub fn set_workspace_host(
+        &self,
+        workspace_id: i64,
+        host_id: Option<i64>,
+    ) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        self.connection().execute(
+            r#"
+            UPDATE workspaces SET
+                host_id = ?2,
+                updated_at = ?3
+            WHERE id = ?1
+            "#,
+            params![workspace_id, host_id, now],
+        )?;
+        Ok(())
     }
 }
 

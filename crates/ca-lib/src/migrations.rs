@@ -34,6 +34,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), DbError> {
     let migrations: &[(i64, MigrationFn)] = &[
         (1, migrate_001_session_project_link),
         (2, migrate_002_reviews_tables),
+        (3, migrate_003_remote_hosts),
     ];
 
     for &(version, migrate_fn) in migrations {
@@ -109,6 +110,36 @@ fn migrate_002_reviews_tables(conn: &Connection) -> Result<(), rusqlite::Error> 
     Ok(())
 }
 
+fn migrate_003_remote_hosts(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS remote_hosts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hostname TEXT NOT NULL,
+            user TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 22,
+            key_path TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_hosts_host_user
+            ON remote_hosts(hostname, user);
+        "#,
+    )?;
+
+    let has_host_id = conn
+        .prepare("SELECT host_id FROM workspaces LIMIT 0")
+        .is_ok();
+    if !has_host_id {
+        conn.execute_batch(
+            "ALTER TABLE workspaces ADD COLUMN host_id INTEGER REFERENCES remote_hosts(id) ON DELETE SET NULL",
+        )?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +158,13 @@ mod tests {
                 state TEXT NOT NULL DEFAULT 'idle',
                 detection_method TEXT NOT NULL,
                 last_activity INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE workspaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );",
@@ -149,7 +187,7 @@ mod tests {
 
         run_migrations(&conn).unwrap();
 
-        assert_eq!(get_schema_version(&conn).unwrap(), 2);
+        assert_eq!(get_schema_version(&conn).unwrap(), 3);
     }
 
     #[test]
@@ -231,13 +269,25 @@ mod tests {
     fn test_already_migrated_skips() {
         let conn = create_legacy_db();
         run_migrations(&conn).unwrap();
-        assert_eq!(get_schema_version(&conn).unwrap(), 2);
+        assert_eq!(get_schema_version(&conn).unwrap(), 3);
 
         // Manually insert a version record to simulate already-migrated
         let conn2 = create_legacy_db();
         run_migrations(&conn2).unwrap();
 
-        // Version should still be 2, not higher
-        assert_eq!(get_schema_version(&conn2).unwrap(), 2);
+        // Version should still be 3, not higher
+        assert_eq!(get_schema_version(&conn2).unwrap(), 3);
+    }
+
+    #[test]
+    fn test_migration_003_creates_remote_hosts() {
+        let conn = create_legacy_db();
+        run_migrations(&conn).unwrap();
+
+        conn.prepare("SELECT id, hostname, user, port, key_path, created_at, updated_at FROM remote_hosts LIMIT 0")
+            .expect("remote_hosts table should exist after migration");
+
+        conn.prepare("SELECT host_id FROM workspaces LIMIT 0")
+            .expect("host_id column should exist on workspaces after migration");
     }
 }

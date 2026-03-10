@@ -2106,6 +2106,7 @@ mod tests {
                 path: "/a".to_string(),
                 created_at: 0,
                 updated_at: 0,
+                host_id: None,
             },
             Workspace {
                 id: 2,
@@ -2113,6 +2114,7 @@ mod tests {
                 path: "/b".to_string(),
                 created_at: 0,
                 updated_at: 0,
+                host_id: None,
             },
         ];
         app.update_workspaces(ws);
@@ -2158,6 +2160,7 @@ mod tests {
             path: format!("/home/user/{name}"),
             created_at: 0,
             updated_at: 0,
+            host_id: None,
         }
     }
 

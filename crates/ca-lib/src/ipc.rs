@@ -484,6 +484,7 @@ mod tests {
                 path: "/home/user/dev".to_string(),
                 created_at: 1706400000,
                 updated_at: 1706500000,
+                host_id: None,
             }],
         };
         let json = serde_json::to_string(&resp).unwrap();

@@ -4,6 +4,7 @@ use crate::form::FormOverlay;
 use crate::git_view;
 use crate::plan_view;
 use crate::project_view;
+use crate::resource_view;
 use crate::review_view;
 use ca_lib::events::EventType;
 use ca_lib::models::SessionState;
@@ -34,6 +35,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app, main_area),
         ViewMode::Review => review_view::draw_review(frame, app, main_area),
         ViewMode::Git => git_view::draw_git(frame, app, main_area),
+        ViewMode::Resources => resource_view::draw_resources(frame, app, main_area),
     }
 
     if app.input_mode == InputMode::Command {
@@ -304,6 +306,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Orchestrator => "Tab:panel s:spawn a:attach b:back ?:help",
         ViewMode::Review => "j/k:scroll n/p:hunk h/l:file c:comment b:back ?:help",
         ViewMode::Git => "j/k:commits Enter:diff n/p:scroll h/l:file b:back ?:help",
+        ViewMode::Resources => "j/k:navigate t:time-filter s:sort b:back ?:help",
     };
 
     let left = Span::styled(
@@ -502,6 +505,7 @@ fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Orchestrator => "Orchestrator",
         ViewMode::Review => "Review",
         ViewMode::Git => "Git",
+        ViewMode::Resources => "Resources",
     };
 
     let block = Block::default()

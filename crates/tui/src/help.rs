@@ -20,6 +20,7 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("p", "Switch to Projects view", "ca project list"),
                 ("r", "Open review for session", ""),
                 ("g", "Git commit stack", "git log"),
+                ("R", "Resource usage", "ca resources show"),
                 ("i", "Toggle untracked filter", ""),
                 ("N", "Create workspace", "ca workspace add <path>"),
             ]);
@@ -79,6 +80,14 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("Enter", "Show commit diff", "git show"),
                 ("n / p", "Scroll diff", ""),
                 ("h / l", "Previous/next file", ""),
+                ("b", "Back to Sessions", ""),
+            ]);
+        }
+        ViewMode::Resources => {
+            entries.extend([
+                ("j / k", "Navigate sessions", ""),
+                ("t", "Toggle time filter (today/week/all)", ""),
+                ("s", "Toggle sort (tokens/cost)", ""),
                 ("b", "Back to Sessions", ""),
             ]);
         }
@@ -157,6 +166,7 @@ mod tests {
             ViewMode::Orchestrator,
             ViewMode::Review,
             ViewMode::Git,
+            ViewMode::Resources,
         ] {
             let content = help_content(mode);
             assert!(

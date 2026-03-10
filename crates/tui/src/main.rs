@@ -7,6 +7,7 @@ mod help;
 mod input;
 mod plan_view;
 mod project_view;
+mod resource_view;
 mod review_view;
 mod ui;
 
@@ -462,9 +463,86 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 Err(e) => app.set_status(format!("Diff error: {e}")),
             }
         }
+        AppAction::LoadResources => {
+            if let Some(db) = db {
+                load_resources(app, db);
+            }
+        }
         // Handled in run_event_loop before reaching handle_action
         AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {}
     }
+}
+
+fn load_resources(app: &mut App, db: &Database) {
+    use resource_view::{ResourceSort, SessionResourceRow, TimeFilter};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    let (from_ts, to_ts) = match app.resource_time_filter {
+        TimeFilter::Today => (now - 86400, now),
+        TimeFilter::Week => (now - 7 * 86400, now),
+        TimeFilter::All => (0, now),
+    };
+
+    let sessions = match db.list_sessions() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let use_range = !matches!(app.resource_time_filter, TimeFilter::All);
+    let mut rows: Vec<SessionResourceRow> = Vec::new();
+    for session in &sessions {
+        let summary = if use_range {
+            db.total_tokens_by_session_in_range(&session.id, from_ts, to_ts)
+                .unwrap_or_default()
+        } else {
+            db.total_tokens_by_session(&session.id).unwrap_or_default()
+        };
+
+        if summary.input_tokens > 0.0 || summary.output_tokens > 0.0 || summary.cost > 0.0 {
+            rows.push(SessionResourceRow {
+                session_id: session.id.clone(),
+                working_dir: session.working_dir.clone(),
+                summary,
+            });
+        }
+    }
+
+    match app.resource_sort {
+        ResourceSort::Tokens => {
+            rows.sort_by(|a, b| {
+                let ta = a.summary.input_tokens + a.summary.output_tokens;
+                let tb = b.summary.input_tokens + b.summary.output_tokens;
+                tb.partial_cmp(&ta).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+        ResourceSort::Cost => {
+            rows.sort_by(|a, b| {
+                b.summary
+                    .cost
+                    .partial_cmp(&a.summary.cost)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+    }
+
+    // Aggregate project totals
+    let mut total = ca_lib::resource::ResourceSummary::default();
+    for r in &rows {
+        total.input_tokens += r.summary.input_tokens;
+        total.output_tokens += r.summary.output_tokens;
+        total.cache_read_tokens += r.summary.cache_read_tokens;
+        total.cache_creation_tokens += r.summary.cache_creation_tokens;
+        total.cost += r.summary.cost;
+    }
+
+    app.resource_rows = rows;
+    app.resource_index = 0;
+    app.resource_project_summary = total;
 }
 
 fn resolve_review_repo_path(app: &App, db: Option<&Database>) -> Option<String> {

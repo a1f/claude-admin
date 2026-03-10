@@ -1,10 +1,12 @@
 use crate::command_palette::CommandPalette;
 use crate::form::{FormKind, FormOverlay};
+use crate::resource_view::{ResourceSort, SessionResourceRow, TimeFilter};
 use ca_lib::events::Event;
 use ca_lib::git_ops::{CommitInfo, DiffFile};
 use ca_lib::models::{Session, SessionState};
 use ca_lib::plan::{Plan, Step, StepStatus};
 use ca_lib::project::Project;
+use ca_lib::resource::ResourceSummary;
 use ca_lib::review::Review;
 use ca_lib::workspace::Workspace;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -27,6 +29,7 @@ pub enum ViewMode {
     Orchestrator,
     Review,
     Git,
+    Resources,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +110,7 @@ pub enum AppAction {
     },
     OpenSessionReview(String),
     LoadGitStack(String),
+    LoadResources,
     LoadCommitDiff {
         repo_path: String,
         commit: String,
@@ -151,6 +155,11 @@ pub struct App {
     pub git_diff_files: Vec<DiffFile>,
     pub git_scroll: u16,
     pub git_file_index: usize,
+    pub resource_rows: Vec<SessionResourceRow>,
+    pub resource_index: usize,
+    pub resource_project_summary: ResourceSummary,
+    pub resource_time_filter: TimeFilter,
+    pub resource_sort: ResourceSort,
 }
 
 impl App {
@@ -193,6 +202,11 @@ impl App {
             git_diff_files: Vec::new(),
             git_scroll: 0,
             git_file_index: 0,
+            resource_rows: Vec::new(),
+            resource_index: 0,
+            resource_project_summary: ResourceSummary::default(),
+            resource_time_filter: TimeFilter::All,
+            resource_sort: ResourceSort::Tokens,
         }
     }
 
@@ -405,6 +419,7 @@ impl App {
                 ViewMode::Orchestrator => self.handle_orchestrator_key(key.code),
                 ViewMode::Review => self.handle_review_key(key),
                 ViewMode::Git => self.handle_git_key(key.code),
+                ViewMode::Resources => self.handle_resources_key(key.code),
             },
         }
     }
@@ -631,6 +646,10 @@ impl App {
                 } else {
                     AppAction::None
                 }
+            }
+            KeyCode::Char('R') => {
+                self.view_mode = ViewMode::Resources;
+                AppAction::LoadResources
             }
             KeyCode::Char('N') => AppAction::OpenForm(FormKind::CreateWorkspace),
             _ => AppAction::None,
@@ -1036,6 +1055,38 @@ impl App {
                     self.git_scroll = 0;
                 }
                 AppAction::None
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::Sessions;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_resources_key(&mut self, code: KeyCode) -> AppAction {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.resource_rows.is_empty()
+                    && self.resource_index < self.resource_rows.len() - 1
+                {
+                    self.resource_index += 1;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if self.resource_index > 0 {
+                    self.resource_index -= 1;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('t') => {
+                self.resource_time_filter = self.resource_time_filter.next();
+                AppAction::LoadResources
+            }
+            KeyCode::Char('s') => {
+                self.resource_sort = self.resource_sort.toggle();
+                AppAction::LoadResources
             }
             KeyCode::Char('b') => {
                 self.view_mode = ViewMode::Sessions;

@@ -325,31 +325,31 @@ Combine claude_admin (Rust daemon, 101 tests) and dacm (Tauri app, designs only)
 ```
  #     | Step                          | Status  | Creates / Modifies                          | Validation                                    | Review Focus
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M5.1  | Remote host registration      | Pending | C: crates/ca-lib/src/remote.rs               | cargo test -p ca-lib remote::tests            | Workspace.host field (local/remote)
+ M5.1  | Remote host registration      | Done | C: crates/ca-lib/src/remote.rs               | cargo test -p ca-lib remote::tests            | Workspace.host field (local/remote)
        | on workspaces                 |         | M: crates/ca-lib/src/db.rs (schema migration)| >= 8 tests: register host, list remotes,       | SSH connection test on register
        |                               |         | M: crates/ca-lib/src/workspace.rs (host)     |   connection test success/failure,             | Store: hostname, user, port, key_path
        |                               |         | M: crates/cli/src/main.rs (remote subcommand)|   duplicate host error, remove host,          | ca remote add user@host --key ~/.ssh/id
        |                               |         |                                             |   workspace linked to remote host             |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M5.2  | SSH tmux commands             | Pending | M: crates/ca-lib/src/remote.rs (ssh ops)     | cargo test -p ca-lib remote::tests            | ssh -t user@host tmux list-panes
+ M5.2  | SSH tmux commands             | Done | M: crates/ca-lib/src/remote.rs (ssh ops)     | cargo test -p ca-lib remote::tests            | ssh -t user@host tmux list-panes
        | (list, capture, send-keys)    |         | M: crates/ca-lib/src/tmux.rs (remote flag)   | >= 8 tests: list_remote_panes parses,          | Timeout on SSH commands (10s)
        |                               |         |                                             |   capture_remote_output works,                 | Error handling: unreachable host
        |                               |         |                                             |   send_keys_remote escapes correctly,         | Key-based auth only (no passwords)
        |                               |         |                                             |   connection failure → graceful error         | Reuse existing tmux.rs patterns
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M5.3  | Remote session discovery      | Pending | M: crates/ca-lib/src/discovery.rs (remote)   | cargo test -p ca-lib discovery::tests         | Extend polling to scan remote hosts
+ M5.3  | Remote session discovery      | Done | M: crates/ca-lib/src/discovery.rs (remote)   | cargo test -p ca-lib discovery::tests         | Extend polling to scan remote hosts
        |                               |         | M: crates/daemon/src/polling.rs (remote scan)| >= 6 tests: remote sessions discovered,        | Session.host = remote hostname
        |                               |         | M: crates/tui/src/ui.rs (host indicator)     |   host field set, TUI shows host badge,       | TUI: [remote] badge next to session
        |                               |         |                                             |   remote down → skip (no crash),              | Remote scan failure → log, continue
        |                               |         |                                             |   mixed local+remote list correct             |
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M5.4  | Commit stack navigation       | Pending | M: crates/ca-lib/src/git_ops.rs (stack)      | cargo test -p ca-lib git_ops::tests           | Branch-based commit stack
+ M5.4  | Commit stack navigation       | Done | M: crates/ca-lib/src/git_ops.rs (stack)      | cargo test -p ca-lib git_ops::tests           | Branch-based commit stack
        | in TUI                        |         | C: crates/tui/src/git_view.rs                | >= 6 tests: stack from log correct,            | Show commits since branch point
        |                               |         | M: crates/tui/src/app.rs (ViewMode::Git)     |   navigate between commits, diff between      | j/k navigate, Enter shows diff
        |                               |         | M: crates/tui/src/ui.rs (route view)         |   adjacent commits, empty branch handled,     | Commit message + stats summary
        |                               |         | M: crates/tui/src/help.rs (git keys)         |   cherry-pick detection                       | Integration with review view
 -------+-------------------------------+---------+---------------------------------------------+-----------------------------------------------+------------------------------------------
- M5.5  | GitHub PR creation            | Pending | C: crates/ca-lib/src/github.rs               | cargo test -p ca-lib github::tests            | Wraps `gh pr create`
+ M5.5  | GitHub PR creation            | Done | C: crates/ca-lib/src/github.rs               | cargo test -p ca-lib github::tests            | Wraps `gh pr create`
        | (ca pr create wrapping gh)    |         | M: crates/cli/src/main.rs (pr subcommand)    | >= 6 tests: pr create args correct,            | Auto-fill title from first commit
        |                               |         |                                             |   body from commit messages, draft flag,       | Body from commit messages
        |                               |         |                                             |   gh not installed → error, pr list/view,     | --draft flag support
@@ -413,7 +413,7 @@ M2.1 -> M2.2 -> M2.3 -> M2.4 -> M2.5 -> M2.6 -> M2.7 -> M2.8 -> M2.9 -> M2.10
 M3.1 -> M3.2 -> M3.3 -> M3.4 -> M3.5 -> M3.6
                                                     (M3 complete ✓)
 M4.1 -> M4.2 -> M4.3 -> M4.4 -> M4.5 -> M4.6 -> M4.7  (M4 complete ✓)
-M5.1 -> M5.2 -> M5.3 -> M5.4 -> M5.5
+M5.1 -> M5.2 -> M5.3 -> M5.4 -> M5.5  (M5 complete ✓)
 M6.1 -> M6.2 -> M6.3 -> M6.4 -> M6.5
 ```
 

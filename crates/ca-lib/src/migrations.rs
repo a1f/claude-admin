@@ -35,6 +35,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), DbError> {
         (1, migrate_001_session_project_link),
         (2, migrate_002_reviews_tables),
         (3, migrate_003_remote_hosts),
+        (4, migrate_004_session_host),
     ];
 
     for &(version, migrate_fn) in migrations {
@@ -107,6 +108,14 @@ fn migrate_002_reviews_tables(conn: &Connection) -> Result<(), rusqlite::Error> 
         CREATE INDEX IF NOT EXISTS idx_review_comments_review_id ON review_comments(review_id);
         "#,
     )?;
+    Ok(())
+}
+
+fn migrate_004_session_host(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let has_host = conn.prepare("SELECT host FROM sessions LIMIT 0").is_ok();
+    if !has_host {
+        conn.execute_batch("ALTER TABLE sessions ADD COLUMN host TEXT")?;
+    }
     Ok(())
 }
 
@@ -187,7 +196,7 @@ mod tests {
 
         run_migrations(&conn).unwrap();
 
-        assert_eq!(get_schema_version(&conn).unwrap(), 3);
+        assert_eq!(get_schema_version(&conn).unwrap(), 4);
     }
 
     #[test]
@@ -269,14 +278,14 @@ mod tests {
     fn test_already_migrated_skips() {
         let conn = create_legacy_db();
         run_migrations(&conn).unwrap();
-        assert_eq!(get_schema_version(&conn).unwrap(), 3);
+        assert_eq!(get_schema_version(&conn).unwrap(), 4);
 
         // Manually insert a version record to simulate already-migrated
         let conn2 = create_legacy_db();
         run_migrations(&conn2).unwrap();
 
-        // Version should still be 3, not higher
-        assert_eq!(get_schema_version(&conn2).unwrap(), 3);
+        // Version should still be 4, not higher
+        assert_eq!(get_schema_version(&conn2).unwrap(), 4);
     }
 
     #[test]

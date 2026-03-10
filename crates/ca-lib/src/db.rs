@@ -156,8 +156,8 @@ impl Database {
             INSERT INTO sessions (
                 id, pane_id, session_name, window_index, pane_index,
                 working_dir, state, detection_method, last_activity,
-                created_at, updated_at, project_id, plan_step_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                created_at, updated_at, project_id, plan_step_id, host
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             "#,
             params![
                 session.id,
@@ -173,6 +173,7 @@ impl Database {
                 session.updated_at,
                 session.project_id,
                 session.plan_step_id,
+                session.host,
             ],
         )?;
         Ok(())
@@ -185,7 +186,7 @@ impl Database {
                 r#"
                 SELECT id, pane_id, session_name, window_index, pane_index,
                        working_dir, state, detection_method, last_activity,
-                       created_at, updated_at, project_id, plan_step_id
+                       created_at, updated_at, project_id, plan_step_id, host
                 FROM sessions WHERE id = ?1
                 "#,
                 params![id],
@@ -207,7 +208,7 @@ impl Database {
                 r#"
                 SELECT id, pane_id, session_name, window_index, pane_index,
                        working_dir, state, detection_method, last_activity,
-                       created_at, updated_at, project_id, plan_step_id
+                       created_at, updated_at, project_id, plan_step_id, host
                 FROM sessions WHERE pane_id = ?1
                 "#,
                 params![pane_id],
@@ -236,7 +237,8 @@ impl Database {
                 last_activity = ?9,
                 updated_at = ?10,
                 project_id = ?11,
-                plan_step_id = ?12
+                plan_step_id = ?12,
+                host = ?13
             WHERE id = ?1
             "#,
             params![
@@ -252,6 +254,7 @@ impl Database {
                 session.updated_at,
                 session.project_id,
                 session.plan_step_id,
+                session.host,
             ],
         )?;
         Ok(())
@@ -281,7 +284,7 @@ impl Database {
             r#"
             SELECT id, pane_id, session_name, window_index, pane_index,
                    working_dir, state, detection_method, last_activity,
-                   created_at, updated_at, project_id, plan_step_id
+                   created_at, updated_at, project_id, plan_step_id, host
             FROM sessions
             ORDER BY created_at DESC
             "#,
@@ -324,6 +327,7 @@ impl Database {
             updated_at: row.get(10)?,
             project_id: row.get(11)?,
             plan_step_id: row.get(12)?,
+            host: row.get(13)?,
         }))
     }
 
@@ -454,6 +458,7 @@ mod tests {
             updated_at: 1706500000,
             project_id: None,
             plan_step_id: None,
+            host: None,
         }
     }
 

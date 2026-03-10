@@ -78,6 +78,7 @@ async fn poll_once(
             }
 
             check_notifications(db, notifier, previous_states).await;
+            scan_remote_hosts(db).await;
         }
         Ok(Err(e)) => {
             tracing::warn!(error = %e, "Discovery poll failed");
@@ -185,6 +186,36 @@ fn check_review_lifecycle(db: &Database, session: &Session) {
     }
 }
 
+/// Discover Claude sessions on all registered remote hosts.
+async fn scan_remote_hosts(db: &Arc<Mutex<Database>>) {
+    let db_clone = Arc::clone(db);
+    let hosts = tokio::task::spawn_blocking(move || {
+        let db = db_clone.lock().expect("database mutex poisoned");
+        db.list_remote_hosts()
+    })
+    .await;
+
+    let hosts = match hosts {
+        Ok(Ok(h)) => h,
+        _ => return,
+    };
+
+    for host in hosts {
+        let db_clone = Arc::clone(db);
+        let _ = tokio::task::spawn_blocking(move || {
+            let db = db_clone.lock().expect("database mutex poisoned");
+            if let Err(e) = ca_lib::discovery::sync_remote_sessions(&db, &host) {
+                tracing::warn!(
+                    host = %host.hostname,
+                    error = %e,
+                    "Remote discovery failed"
+                );
+            }
+        })
+        .await;
+    }
+}
+
 /// Fetch current session list from DB and broadcast to all subscribers.
 pub async fn broadcast_sessions(
     db: &Arc<Mutex<Database>>,
@@ -234,6 +265,7 @@ mod tests {
             updated_at: 0,
             project_id,
             plan_step_id: None,
+            host: None,
         }
     }
 

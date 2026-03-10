@@ -131,9 +131,16 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
                 }
             };
 
+            let host_badge = if s.host.is_some() {
+                Span::styled("[R] ", Style::default().fg(Color::Cyan))
+            } else {
+                Span::raw("")
+            };
+
             let content = Line::from(vec![
                 Span::styled(pos, Style::default().fg(Color::DarkGray)),
                 Span::styled(indicator, indicator_style),
+                host_badge,
                 Span::styled(&*s.id, text_style),
                 Span::raw("  "),
                 Span::styled(s.state.as_str(), state_style),
@@ -194,9 +201,16 @@ fn build_preview_lines<'a>(app: &'a App, session: &'a ca_lib::models::Session) -
             Span::styled("Dir: ", bold),
             Span::raw(&session.working_dir),
         ]),
-        Line::from(""),
-        Line::styled("--- Events ---", bold),
     ];
+
+    if let Some(host) = &session.host {
+        lines.push(Line::from(vec![
+            Span::styled("Host: ", bold),
+            Span::styled(host.as_str(), Style::default().fg(Color::Cyan)),
+        ]));
+    }
+
+    lines.extend([Line::from(""), Line::styled("--- Events ---", bold)]);
 
     if app.preview_events.is_empty() {
         lines.push(Line::from("No events yet."));

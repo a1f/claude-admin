@@ -169,6 +169,7 @@ pub fn sync_sessions(db: &Database) -> Result<SyncResult, DiscoveryError> {
                     updated_at: now,
                     project_id: None,
                     plan_step_id: None,
+                    host: None,
                 };
 
                 db.create_session(&session)?;
@@ -190,8 +191,126 @@ pub fn sync_sessions(db: &Database) -> Result<SyncResult, DiscoveryError> {
     Ok(result)
 }
 
-/// Remove sessions from DB whose panes are no longer active.
+/// Discover Claude panes on a remote host via SSH.
+pub fn discover_remote_claude_panes(
+    host: &crate::remote::RemoteHost,
+) -> Result<Vec<ClaudeLocation>, DiscoveryError> {
+    let panes = crate::remote::list_remote_panes(host)?;
+    let now = now_unix();
+    let mut locations = Vec::new();
+
+    for pane in &panes {
+        if let Ok(process) = crate::remote::get_remote_pane_process(host, &pane.pane_id) {
+            if is_claude_process(&process) {
+                locations.push(ClaudeLocation {
+                    pane: pane.clone(),
+                    detection_method: DetectionMethod::ProcessName,
+                    detected_at: now,
+                });
+            }
+        }
+    }
+
+    Ok(locations)
+}
+
+/// Synchronize remote sessions for a specific host.
 ///
+/// Discovers Claude panes on the remote host, creates/updates sessions
+/// in the database, and removes stale remote sessions.
+pub fn sync_remote_sessions(
+    db: &Database,
+    host: &crate::remote::RemoteHost,
+) -> Result<SyncResult, DiscoveryError> {
+    let locations = discover_remote_claude_panes(host)?;
+    let now = now_unix();
+    let mut result = SyncResult::default();
+    let hostname = &host.hostname;
+
+    let active_pane_ids: HashSet<String> = locations
+        .iter()
+        .map(|l| format!("{}:{}", hostname, l.pane.pane_id))
+        .collect();
+
+    for location in &locations {
+        let remote_pane_id = format!("{}:{}", hostname, location.pane.pane_id);
+
+        match db.get_session_by_pane(&remote_pane_id)? {
+            Some(existing) => {
+                let content = crate::remote::capture_remote_pane(
+                    host,
+                    &location.pane.pane_id,
+                    CONTENT_CAPTURE_LINES,
+                )
+                .unwrap_or_default();
+                let new_state = detect_state(&content);
+
+                if new_state != existing.state {
+                    let old_state = existing.state;
+                    db.update_session_state(&existing.id, new_state, now)?;
+                    db.log_event(
+                        &existing.id,
+                        &EventType::StateChanged {
+                            from: old_state,
+                            to: new_state,
+                        },
+                        None,
+                    )?;
+                    result.updated.push(existing.id.clone());
+                }
+            }
+            None => {
+                let content = crate::remote::capture_remote_pane(
+                    host,
+                    &location.pane.pane_id,
+                    CONTENT_CAPTURE_LINES,
+                )
+                .unwrap_or_default();
+                let state = detect_state(&content);
+
+                let session = Session {
+                    id: Uuid::new_v4().to_string(),
+                    pane_id: remote_pane_id,
+                    session_name: location.pane.session_name.clone(),
+                    window_index: location.pane.window_index,
+                    pane_index: location.pane.pane_index,
+                    working_dir: location.pane.working_dir.clone(),
+                    state,
+                    detection_method: location.detection_method.to_string(),
+                    last_activity: now,
+                    created_at: now,
+                    updated_at: now,
+                    project_id: None,
+                    plan_step_id: None,
+                    host: Some(hostname.clone()),
+                };
+
+                db.create_session(&session)?;
+                db.log_event(&session.id, &EventType::SessionDiscovered, None)?;
+                result.discovered.push(session.id);
+            }
+        }
+    }
+
+    // Clean up remote sessions whose panes no longer exist on this host
+    if let Ok(all_sessions) = db.list_sessions() {
+        for session in all_sessions {
+            if session.host.as_deref() == Some(hostname)
+                && !active_pane_ids.contains(&session.pane_id)
+            {
+                db.delete_events_for_session(&session.id)?;
+                db.delete_session(&session.id)?;
+                result.removed.push(session.id);
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Remove local sessions from DB whose panes are no longer active.
+///
+/// Only considers sessions with `host: None` (local).
 /// Deletes associated events first to satisfy FK constraints,
 /// then removes the session row.
 fn cleanup_stale_sessions(
@@ -202,6 +321,10 @@ fn cleanup_stale_sessions(
     let mut removed = Vec::new();
 
     for session in existing {
+        // Skip remote sessions -- they have their own cleanup path
+        if session.host.is_some() {
+            continue;
+        }
         if !active_pane_ids.contains(&session.pane_id) {
             db.delete_events_for_session(&session.id)?;
             db.delete_session(&session.id)?;
@@ -251,6 +374,7 @@ mod tests {
             updated_at: 1706500000,
             project_id: None,
             plan_step_id: None,
+            host: None,
         }
     }
 
@@ -422,5 +546,113 @@ mod tests {
     fn test_discovery_error_display() {
         let err = DiscoveryError::Tmux(TmuxError::NotRunning);
         assert_eq!(err.to_string(), "tmux error: tmux not running");
+    }
+
+    // --- Remote discovery tests ---
+
+    fn create_remote_session(id: &str, pane_id: &str, hostname: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            pane_id: pane_id.to_string(),
+            session_name: "main".to_string(),
+            window_index: 0,
+            pane_index: 0,
+            working_dir: "/remote/project".to_string(),
+            state: SessionState::Working,
+            detection_method: "process_name".to_string(),
+            last_activity: 1706500000,
+            created_at: 1706400000,
+            updated_at: 1706500000,
+            project_id: None,
+            plan_step_id: None,
+            host: Some(hostname.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_is_claude_process_works_for_remote_context() {
+        // is_claude_process is shared between local and remote discovery
+        assert!(is_claude_process("claude"));
+        assert!(is_claude_process("node"));
+        assert!(is_claude_process("1.0.12"));
+        assert!(!is_claude_process("bash"));
+    }
+
+    #[test]
+    fn test_session_host_field_set_for_remote() {
+        let (db, _dir) = create_test_db();
+        let session = create_remote_session("sess-r1", "server1:%5", "server1");
+        db.create_session(&session).unwrap();
+
+        let retrieved = db.get_session("sess-r1").unwrap().unwrap();
+        assert_eq!(retrieved.host, Some("server1".to_string()));
+    }
+
+    #[test]
+    fn test_remote_pane_id_includes_hostname() {
+        let hostname = "prod-server";
+        let local_pane_id = "%10";
+        let remote_pane_id = format!("{}:{}", hostname, local_pane_id);
+
+        assert_eq!(remote_pane_id, "prod-server:%10");
+        assert!(remote_pane_id.starts_with(hostname));
+    }
+
+    #[test]
+    fn test_cleanup_stale_skips_remote_sessions() {
+        let (db, _dir) = create_test_db();
+
+        // Create a local session and a remote session
+        let local = create_test_session("sess-local", "%0");
+        db.create_session(&local).unwrap();
+
+        let remote = create_remote_session("sess-remote", "server1:%5", "server1");
+        db.create_session(&remote).unwrap();
+
+        // Run cleanup with no active local panes
+        let active: HashSet<String> = HashSet::new();
+        let removed = cleanup_stale_sessions(&db, &active).unwrap();
+
+        // Only the local session should be removed
+        assert_eq!(removed, vec!["sess-local"]);
+        assert!(db.get_session("sess-local").unwrap().is_none());
+        assert!(db.get_session("sess-remote").unwrap().is_some());
+    }
+
+    #[test]
+    fn test_session_host_none_for_local() {
+        let session = create_test_session("sess-local", "%0");
+        assert!(session.host.is_none());
+    }
+
+    #[test]
+    fn test_session_host_field_serialization() {
+        let session = create_remote_session("sess-r1", "server1:%5", "server1");
+        let json = serde_json::to_string(&session).unwrap();
+        let parsed: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.host, Some("server1".to_string()));
+    }
+
+    #[test]
+    fn test_session_host_none_serialization() {
+        let session = create_test_session("sess-local", "%0");
+        let json = serde_json::to_string(&session).unwrap();
+        let parsed: Session = serde_json::from_str(&json).unwrap();
+        assert!(parsed.host.is_none());
+    }
+
+    #[test]
+    fn test_remote_session_db_roundtrip() {
+        let (db, _dir) = create_test_db();
+        let session = create_remote_session("sess-r2", "prod:%3", "prod");
+        db.create_session(&session).unwrap();
+
+        let by_id = db.get_session("sess-r2").unwrap().unwrap();
+        assert_eq!(by_id.host, Some("prod".to_string()));
+        assert_eq!(by_id.pane_id, "prod:%3");
+
+        let by_pane = db.get_session_by_pane("prod:%3").unwrap().unwrap();
+        assert_eq!(by_pane.id, "sess-r2");
+        assert_eq!(by_pane.host, Some("prod".to_string()));
     }
 }

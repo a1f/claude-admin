@@ -174,6 +174,7 @@ mod tests {
             updated_at: 1706500000,
             project_id: None,
             plan_step_id: None,
+            host: None,
         }
     }
 

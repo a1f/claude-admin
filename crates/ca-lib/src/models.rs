@@ -68,6 +68,7 @@ pub struct Session {
     pub updated_at: i64,
     pub project_id: Option<i64>,
     pub plan_step_id: Option<String>,
+    pub host: Option<String>,
 }
 
 #[cfg(test)]
@@ -161,6 +162,7 @@ mod tests {
             updated_at: 1706500000,
             project_id: Some(42),
             plan_step_id: Some("1.3".to_string()),
+            host: None,
         };
 
         let json = serde_json::to_string(&session).unwrap();
@@ -184,6 +186,7 @@ mod tests {
             updated_at: 100,
             project_id: Some(5),
             plan_step_id: Some("0.1".to_string()),
+            host: None,
         };
 
         let json = serde_json::to_string_pretty(&session).unwrap();

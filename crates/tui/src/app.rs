@@ -1126,6 +1126,7 @@ mod tests {
             updated_at: 0,
             project_id: None,
             plan_step_id: None,
+            host: None,
         }
     }
 
@@ -1711,6 +1712,7 @@ mod tests {
             updated_at: 0,
             project_id,
             plan_step_id: step_id.map(String::from),
+            host: None,
         }
     }
 
@@ -2525,6 +2527,7 @@ mod tests {
             updated_at: 0,
             project_id: None,
             plan_step_id: None,
+            host: None,
         }
     }
 

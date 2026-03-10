@@ -1,3 +1,5 @@
+use crate::db::{Database, DbError};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -19,6 +21,17 @@ impl MetricType {
             MetricType::CacheReadTokens => "cache_read_tokens",
             MetricType::CacheCreationTokens => "cache_creation_tokens",
             MetricType::Cost => "cost",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "input_tokens" => Some(MetricType::InputTokens),
+            "output_tokens" => Some(MetricType::OutputTokens),
+            "cache_read_tokens" => Some(MetricType::CacheReadTokens),
+            "cache_creation_tokens" => Some(MetricType::CacheCreationTokens),
+            "cost" => Some(MetricType::Cost),
+            _ => None,
         }
     }
 }
@@ -199,6 +212,166 @@ pub fn usage_to_metrics(
             })
         })
         .collect()
+}
+
+/// Aggregated resource summary for a session or project.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ResourceSummary {
+    pub input_tokens: f64,
+    pub output_tokens: f64,
+    pub cache_read_tokens: f64,
+    pub cache_creation_tokens: f64,
+    pub cost: f64,
+}
+
+// -- Database CRUD & aggregation --
+
+impl Database {
+    pub fn insert_resource_metric(&self, metric: &ResourceMetric) -> Result<i64, DbError> {
+        self.connection().execute(
+            r#"INSERT INTO resource_usage (session_id, metric_type, value, timestamp)
+               VALUES (?1, ?2, ?3, ?4)"#,
+            params![
+                metric.session_id,
+                metric.metric_type.as_str(),
+                metric.value,
+                metric.timestamp,
+            ],
+        )?;
+        Ok(self.connection().last_insert_rowid())
+    }
+
+    pub fn insert_resource_metrics(&self, metrics: &[ResourceMetric]) -> Result<usize, DbError> {
+        for m in metrics {
+            self.insert_resource_metric(m)?;
+        }
+        Ok(metrics.len())
+    }
+
+    pub fn get_resource_metrics_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<ResourceMetric>, DbError> {
+        let mut stmt = self.connection().prepare(
+            r#"SELECT session_id, metric_type, value, timestamp
+               FROM resource_usage
+               WHERE session_id = ?1
+               ORDER BY timestamp DESC"#,
+        )?;
+
+        let rows = stmt.query_map(params![session_id], |row| Ok(row_to_resource_metric(row)))?;
+
+        let mut metrics = Vec::new();
+        for r in rows {
+            metrics.extend(r?);
+        }
+        Ok(metrics)
+    }
+
+    pub fn total_tokens_by_session(&self, session_id: &str) -> Result<ResourceSummary, DbError> {
+        self.aggregate_resources(
+            r#"SELECT metric_type, COALESCE(SUM(value), 0)
+               FROM resource_usage
+               WHERE session_id = ?1
+               GROUP BY metric_type"#,
+            params![session_id],
+        )
+    }
+
+    pub fn total_tokens_by_project(&self, project_id: i64) -> Result<ResourceSummary, DbError> {
+        self.aggregate_resources(
+            r#"SELECT ru.metric_type, COALESCE(SUM(ru.value), 0)
+               FROM resource_usage ru
+               JOIN sessions s ON ru.session_id = s.id
+               WHERE s.project_id = ?1
+               GROUP BY ru.metric_type"#,
+            params![project_id],
+        )
+    }
+
+    pub fn total_tokens_by_session_in_range(
+        &self,
+        session_id: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<ResourceSummary, DbError> {
+        self.aggregate_resources(
+            r#"SELECT metric_type, COALESCE(SUM(value), 0)
+               FROM resource_usage
+               WHERE session_id = ?1 AND timestamp >= ?2 AND timestamp <= ?3
+               GROUP BY metric_type"#,
+            params![session_id, from_ts, to_ts],
+        )
+    }
+
+    pub fn total_tokens_by_project_in_range(
+        &self,
+        project_id: i64,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<ResourceSummary, DbError> {
+        self.aggregate_resources(
+            r#"SELECT ru.metric_type, COALESCE(SUM(ru.value), 0)
+               FROM resource_usage ru
+               JOIN sessions s ON ru.session_id = s.id
+               WHERE s.project_id = ?1 AND ru.timestamp >= ?2 AND ru.timestamp <= ?3
+               GROUP BY ru.metric_type"#,
+            params![project_id, from_ts, to_ts],
+        )
+    }
+
+    pub fn cost_by_project(&self, project_id: i64) -> Result<f64, DbError> {
+        let cost: f64 = self.connection().query_row(
+            r#"SELECT COALESCE(SUM(ru.value), 0)
+               FROM resource_usage ru
+               JOIN sessions s ON ru.session_id = s.id
+               WHERE s.project_id = ?1 AND ru.metric_type = 'cost'"#,
+            params![project_id],
+            |row| row.get(0),
+        )?;
+        Ok(cost)
+    }
+
+    fn aggregate_resources(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> Result<ResourceSummary, DbError> {
+        let mut stmt = self.connection().prepare(sql)?;
+        let rows = stmt.query_map(params, |row| {
+            let mt: String = row.get(0)?;
+            let val: f64 = row.get(1)?;
+            Ok((mt, val))
+        })?;
+
+        let mut summary = ResourceSummary::default();
+        for r in rows {
+            let (mt, val) = r?;
+            match mt.as_str() {
+                "input_tokens" => summary.input_tokens = val,
+                "output_tokens" => summary.output_tokens = val,
+                "cache_read_tokens" => summary.cache_read_tokens = val,
+                "cache_creation_tokens" => summary.cache_creation_tokens = val,
+                "cost" => summary.cost = val,
+                _ => {}
+            }
+        }
+        Ok(summary)
+    }
+}
+
+fn row_to_resource_metric(row: &rusqlite::Row) -> Option<ResourceMetric> {
+    let session_id: String = row.get(0).ok()?;
+    let mt_str: String = row.get(1).ok()?;
+    let value: f64 = row.get(2).ok()?;
+    let timestamp: i64 = row.get(3).ok()?;
+
+    MetricType::parse(&mt_str).map(|metric_type| ResourceMetric {
+        session_id,
+        metric_type,
+        value,
+        timestamp,
+    })
 }
 
 #[cfg(test)]
@@ -495,5 +668,245 @@ mod tests {
         // Convert to metrics
         let metrics = usage_to_metrics("sess-abc", &usage, 1706500000);
         assert_eq!(metrics.len(), 5);
+    }
+
+    // -- DB tests --
+
+    use crate::models::{Session, SessionState};
+
+    fn make_db() -> (Database, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        (db, dir)
+    }
+
+    fn make_session(id: &str, pane_id: &str, project_id: Option<i64>) -> Session {
+        Session {
+            id: id.to_string(),
+            pane_id: pane_id.to_string(),
+            session_name: "main".to_string(),
+            window_index: 0,
+            pane_index: 0,
+            working_dir: "/home/user/project".to_string(),
+            state: SessionState::Idle,
+            detection_method: "process_name".to_string(),
+            last_activity: 1706500000,
+            created_at: 1706400000,
+            updated_at: 1706500000,
+            project_id,
+            plan_step_id: None,
+            host: None,
+        }
+    }
+
+    fn make_metric(session_id: &str, mt: MetricType, value: f64, ts: i64) -> ResourceMetric {
+        ResourceMetric {
+            session_id: session_id.to_string(),
+            metric_type: mt,
+            value,
+            timestamp: ts,
+        }
+    }
+
+    #[test]
+    fn test_insert_and_query_resource_metric() {
+        let (db, _dir) = make_db();
+        let session = make_session("sess-1", "%0", None);
+        db.create_session(&session).unwrap();
+
+        let metric = make_metric("sess-1", MetricType::InputTokens, 5000.0, 1706500000);
+        let id = db.insert_resource_metric(&metric).unwrap();
+        assert!(id > 0);
+
+        let metrics = db.get_resource_metrics_by_session("sess-1").unwrap();
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(metrics[0].metric_type, MetricType::InputTokens);
+        assert_eq!(metrics[0].value, 5000.0);
+    }
+
+    #[test]
+    fn test_insert_multiple_metrics() {
+        let (db, _dir) = make_db();
+        let session = make_session("sess-1", "%0", None);
+        db.create_session(&session).unwrap();
+
+        let metrics = vec![
+            make_metric("sess-1", MetricType::InputTokens, 5000.0, 1706500000),
+            make_metric("sess-1", MetricType::OutputTokens, 1200.0, 1706500000),
+            make_metric("sess-1", MetricType::Cost, 0.05, 1706500000),
+        ];
+
+        let count = db.insert_resource_metrics(&metrics).unwrap();
+        assert_eq!(count, 3);
+
+        let stored = db.get_resource_metrics_by_session("sess-1").unwrap();
+        assert_eq!(stored.len(), 3);
+    }
+
+    #[test]
+    fn test_query_by_session_empty() {
+        let (db, _dir) = make_db();
+        let session = make_session("sess-1", "%0", None);
+        db.create_session(&session).unwrap();
+
+        let metrics = db.get_resource_metrics_by_session("sess-1").unwrap();
+        assert!(metrics.is_empty());
+    }
+
+    #[test]
+    fn test_total_tokens_by_session() {
+        let (db, _dir) = make_db();
+        let session = make_session("sess-1", "%0", None);
+        db.create_session(&session).unwrap();
+
+        let metrics = vec![
+            make_metric("sess-1", MetricType::InputTokens, 3000.0, 1706500000),
+            make_metric("sess-1", MetricType::InputTokens, 2000.0, 1706500001),
+            make_metric("sess-1", MetricType::OutputTokens, 1200.0, 1706500000),
+            make_metric("sess-1", MetricType::Cost, 0.05, 1706500000),
+        ];
+        db.insert_resource_metrics(&metrics).unwrap();
+
+        let summary = db.total_tokens_by_session("sess-1").unwrap();
+        assert!((summary.input_tokens - 5000.0).abs() < 0.01);
+        assert!((summary.output_tokens - 1200.0).abs() < 0.01);
+        assert!((summary.cost - 0.05).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_total_tokens_by_session_empty_returns_zero() {
+        let (db, _dir) = make_db();
+        let session = make_session("sess-1", "%0", None);
+        db.create_session(&session).unwrap();
+
+        let summary = db.total_tokens_by_session("sess-1").unwrap();
+        assert_eq!(summary.input_tokens, 0.0);
+        assert_eq!(summary.output_tokens, 0.0);
+        assert_eq!(summary.cost, 0.0);
+    }
+
+    #[test]
+    fn test_total_tokens_by_project() {
+        let (db, _dir) = make_db();
+
+        // Create workspace + project
+        let ws = db.create_workspace("/tmp/ws", Some("ws")).unwrap();
+        let proj = db.create_project(ws.id, "proj", None).unwrap();
+
+        let s1 = make_session("sess-1", "%0", Some(proj.id));
+        let s2 = make_session("sess-2", "%1", Some(proj.id));
+        db.create_session(&s1).unwrap();
+        db.create_session(&s2).unwrap();
+
+        db.insert_resource_metrics(&[
+            make_metric("sess-1", MetricType::InputTokens, 3000.0, 1706500000),
+            make_metric("sess-2", MetricType::InputTokens, 2000.0, 1706500000),
+            make_metric("sess-1", MetricType::Cost, 0.03, 1706500000),
+            make_metric("sess-2", MetricType::Cost, 0.02, 1706500000),
+        ])
+        .unwrap();
+
+        let summary = db.total_tokens_by_project(proj.id).unwrap();
+        assert!((summary.input_tokens - 5000.0).abs() < 0.01);
+        assert!((summary.cost - 0.05).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cost_by_project() {
+        let (db, _dir) = make_db();
+
+        let ws = db.create_workspace("/tmp/ws", Some("ws")).unwrap();
+        let proj = db.create_project(ws.id, "proj", None).unwrap();
+
+        let s1 = make_session("sess-1", "%0", Some(proj.id));
+        db.create_session(&s1).unwrap();
+
+        db.insert_resource_metrics(&[
+            make_metric("sess-1", MetricType::Cost, 0.10, 1706500000),
+            make_metric("sess-1", MetricType::Cost, 0.05, 1706500001),
+            make_metric("sess-1", MetricType::InputTokens, 9000.0, 1706500000),
+        ])
+        .unwrap();
+
+        let cost = db.cost_by_project(proj.id).unwrap();
+        assert!((cost - 0.15).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cost_by_project_empty_returns_zero() {
+        let (db, _dir) = make_db();
+
+        let ws = db.create_workspace("/tmp/ws", Some("ws")).unwrap();
+        let proj = db.create_project(ws.id, "proj", None).unwrap();
+
+        let cost = db.cost_by_project(proj.id).unwrap();
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn test_time_range_filter_session() {
+        let (db, _dir) = make_db();
+        let session = make_session("sess-1", "%0", None);
+        db.create_session(&session).unwrap();
+
+        db.insert_resource_metrics(&[
+            make_metric("sess-1", MetricType::InputTokens, 1000.0, 100),
+            make_metric("sess-1", MetricType::InputTokens, 2000.0, 200),
+            make_metric("sess-1", MetricType::InputTokens, 3000.0, 300),
+        ])
+        .unwrap();
+
+        // Only include timestamps 150..250
+        let summary = db
+            .total_tokens_by_session_in_range("sess-1", 150, 250)
+            .unwrap();
+        assert!((summary.input_tokens - 2000.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_time_range_filter_project() {
+        let (db, _dir) = make_db();
+
+        let ws = db.create_workspace("/tmp/ws", Some("ws")).unwrap();
+        let proj = db.create_project(ws.id, "proj", None).unwrap();
+
+        let s1 = make_session("sess-1", "%0", Some(proj.id));
+        db.create_session(&s1).unwrap();
+
+        db.insert_resource_metrics(&[
+            make_metric("sess-1", MetricType::Cost, 0.01, 100),
+            make_metric("sess-1", MetricType::Cost, 0.02, 200),
+            make_metric("sess-1", MetricType::Cost, 0.03, 300),
+        ])
+        .unwrap();
+
+        let summary = db
+            .total_tokens_by_project_in_range(proj.id, 150, 350)
+            .unwrap();
+        assert!((summary.cost - 0.05).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_metric_type_from_str_roundtrip() {
+        for mt in [
+            MetricType::InputTokens,
+            MetricType::OutputTokens,
+            MetricType::CacheReadTokens,
+            MetricType::CacheCreationTokens,
+            MetricType::Cost,
+        ] {
+            assert_eq!(MetricType::parse(mt.as_str()), Some(mt));
+        }
+        assert_eq!(MetricType::parse("unknown"), None);
+    }
+
+    #[test]
+    fn test_resource_summary_default_is_zero() {
+        let summary = ResourceSummary::default();
+        assert_eq!(summary.input_tokens, 0.0);
+        assert_eq!(summary.output_tokens, 0.0);
+        assert_eq!(summary.cache_read_tokens, 0.0);
+        assert_eq!(summary.cache_creation_tokens, 0.0);
+        assert_eq!(summary.cost, 0.0);
     }
 }

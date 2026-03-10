@@ -36,6 +36,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), DbError> {
         (2, migrate_002_reviews_tables),
         (3, migrate_003_remote_hosts),
         (4, migrate_004_session_host),
+        (5, migrate_005_resource_usage),
     ];
 
     for &(version, migrate_fn) in migrations {
@@ -149,6 +150,26 @@ fn migrate_003_remote_hosts(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+fn migrate_005_resource_usage(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS resource_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            metric_type TEXT NOT NULL,
+            value REAL NOT NULL,
+            timestamp INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_resource_usage_session_id ON resource_usage(session_id);
+        CREATE INDEX IF NOT EXISTS idx_resource_usage_timestamp ON resource_usage(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_resource_usage_metric_type ON resource_usage(metric_type);
+        "#,
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,7 +217,7 @@ mod tests {
 
         run_migrations(&conn).unwrap();
 
-        assert_eq!(get_schema_version(&conn).unwrap(), 4);
+        assert_eq!(get_schema_version(&conn).unwrap(), 5);
     }
 
     #[test]
@@ -278,14 +299,14 @@ mod tests {
     fn test_already_migrated_skips() {
         let conn = create_legacy_db();
         run_migrations(&conn).unwrap();
-        assert_eq!(get_schema_version(&conn).unwrap(), 4);
+        assert_eq!(get_schema_version(&conn).unwrap(), 5);
 
         // Manually insert a version record to simulate already-migrated
         let conn2 = create_legacy_db();
         run_migrations(&conn2).unwrap();
 
-        // Version should still be 4, not higher
-        assert_eq!(get_schema_version(&conn2).unwrap(), 4);
+        // Version should still be 5, not higher
+        assert_eq!(get_schema_version(&conn2).unwrap(), 5);
     }
 
     #[test]

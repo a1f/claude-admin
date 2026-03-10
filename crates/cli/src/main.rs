@@ -116,6 +116,11 @@ pub enum Command {
         #[command(subcommand)]
         command: ReviewCommand,
     },
+    /// GitHub PR operations
+    Pr {
+        #[command(subcommand)]
+        command: PrCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -221,6 +226,28 @@ pub enum ReviewCommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum PrCommand {
+    /// Create a pull request
+    Create {
+        /// Custom title (default: first commit message)
+        #[arg(long)]
+        title: Option<String>,
+        /// Custom body (default: commit messages)
+        #[arg(long)]
+        body: Option<String>,
+        /// Base branch (default: main)
+        #[arg(long)]
+        base: Option<String>,
+        /// Create as draft PR
+        #[arg(long)]
+        draft: bool,
+        /// Repository path (default: current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -255,6 +282,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             auto,
         } => handle_batch(plan_id, steps.as_deref(), max, auto),
         Command::Review { command } => handle_review(command),
+        Command::Pr { command } => handle_pr(command),
     }
 }
 
@@ -644,6 +672,43 @@ fn handle_review(command: ReviewCommand) -> Result<(), CliError> {
                 let _ = std::process::Command::new("open").arg(&out_path).status();
             }
             Ok(())
+        }
+    }
+}
+
+fn handle_pr(command: PrCommand) -> Result<(), CliError> {
+    match command {
+        PrCommand::Create {
+            title,
+            body,
+            base,
+            draft,
+            path,
+        } => {
+            let repo_path = std::fs::canonicalize(&path)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| path.clone());
+
+            let auto_t =
+                title.or_else(|| ca_lib::github::auto_title(&repo_path, base.as_deref()).ok());
+            let auto_b =
+                body.or_else(|| ca_lib::github::auto_body(&repo_path, base.as_deref()).ok());
+
+            let opts = ca_lib::github::PrCreateOptions {
+                title: auto_t,
+                body: auto_b,
+                base,
+                draft,
+                repo_path,
+            };
+
+            match ca_lib::github::create_pr(&opts) {
+                Ok(result) => {
+                    println!("Created PR #{}: {}", result.number, result.url);
+                    Ok(())
+                }
+                Err(e) => Err(CliError::DaemonError(e.to_string())),
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 use crate::db::{Database, DbError};
 use crate::events::EventType;
 use crate::models::{Session, SessionState};
+use crate::resource::{TokenUsage, parse_token_usage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -34,6 +35,11 @@ pub fn infer_state_from_hook(hook_type: &str) -> Option<SessionState> {
 pub fn find_session_for_hook(db: &Database, working_dir: &str) -> Result<Option<Session>, DbError> {
     let sessions = db.list_sessions()?;
     Ok(sessions.into_iter().find(|s| s.working_dir == working_dir))
+}
+
+/// Extract token usage from a hook event's payload (if present).
+pub fn extract_token_usage(event: &HookEvent) -> Option<TokenUsage> {
+    event.payload.as_ref().and_then(parse_token_usage)
 }
 
 pub fn apply_hook_event(db: &Database, event: &HookEvent) -> Result<Option<String>, HookError> {

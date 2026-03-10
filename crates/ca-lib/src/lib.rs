@@ -15,6 +15,7 @@ pub mod orchestrator;
 pub mod plan;
 pub mod project;
 pub mod remote;
+pub mod resource;
 pub mod review;
 pub mod settings;
 pub mod spawn;

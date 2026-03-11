@@ -82,7 +82,7 @@ fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(33), Constraint::Percentage(67)])
         .split(area);
 
     draw_session_list(frame, app, chunks[0]);

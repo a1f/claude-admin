@@ -390,6 +390,40 @@ impl App {
         self.visible_sessions().get(self.selected_index).copied()
     }
 
+    /// Groups visible sessions by project. Returns `(group_name, session_indices)` pairs
+    /// where indices refer to positions in `visible_sessions()`.
+    pub fn grouped_sessions(&self) -> Vec<(String, Vec<usize>)> {
+        let visible = self.visible_sessions();
+        let mut groups: Vec<(Option<i64>, String, Vec<usize>)> = Vec::new();
+
+        for (i, session) in visible.iter().enumerate() {
+            let project_id = session.project_id;
+            let group_name = project_id
+                .and_then(|pid| self.projects.iter().find(|p| p.id == pid))
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Unassigned".to_string());
+
+            if let Some(group) = groups.iter_mut().find(|(gid, _, _)| *gid == project_id) {
+                group.2.push(i);
+            } else {
+                groups.push((project_id, group_name, vec![i]));
+            }
+        }
+
+        // Sort: assigned projects first (alphabetically), unassigned last
+        groups.sort_by(|a, b| match (a.0, b.0) {
+            (None, None) => std::cmp::Ordering::Equal,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (Some(_), Some(_)) => a.1.cmp(&b.1),
+        });
+
+        groups
+            .into_iter()
+            .map(|(_, name, idxs)| (name, idxs))
+            .collect()
+    }
+
     /// Returns sessions linked to the current plan's project.
     pub fn project_sessions(&self) -> Vec<&Session> {
         let Some(plan) = &self.current_plan else {

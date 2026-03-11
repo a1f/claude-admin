@@ -92,50 +92,71 @@ fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+fn session_row_style(state: &SessionState, blink: bool) -> (Style, Style, Style) {
+    match state {
+        SessionState::NeedsInput => {
+            if blink {
+                let bold_yellow = Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD);
+                (bold_yellow, bold_yellow, bold_yellow)
+            } else {
+                let yellow = Style::default().fg(Color::Yellow);
+                (yellow, yellow, Style::default())
+            }
+        }
+        SessionState::Working => {
+            let green = if blink {
+                Color::LightGreen
+            } else {
+                Color::Green
+            };
+            let gs = Style::default().fg(green);
+            (gs, gs, Style::default())
+        }
+        SessionState::Done => {
+            let dim = Style::default().fg(Color::DarkGray);
+            (dim, dim, dim)
+        }
+        SessionState::Idle => {
+            let white = Style::default().fg(Color::White);
+            (white, white, Style::default())
+        }
+    }
+}
+
 fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     let visible = app.visible_sessions();
     let blink = app.blink_on();
-    let items: Vec<ListItem> = visible
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let pos = if i < 9 {
-                format!("{} ", i + 1)
+    let groups = app.grouped_sessions();
+
+    // Build items with group headers; track which list index maps to selected_index
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut highlight_index: Option<usize> = None;
+
+    for (group_name, session_indices) in &groups {
+        // Group header (non-selectable visual separator)
+        let header = ListItem::new(Line::from(Span::styled(
+            format!("── {group_name} ──"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        items.push(header);
+
+        for &idx in session_indices {
+            let s = visible[idx];
+            if idx == app.selected_index {
+                highlight_index = Some(items.len());
+            }
+
+            let pos = if idx < 9 {
+                format!("{} ", idx + 1)
             } else {
                 "  ".to_string()
             };
             let indicator = state_indicator(&s.state);
-
-            let (indicator_style, state_style, text_style) = match s.state {
-                SessionState::NeedsInput => {
-                    if blink {
-                        let bold_yellow = Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD);
-                        (bold_yellow, bold_yellow, bold_yellow)
-                    } else {
-                        let yellow = Style::default().fg(Color::Yellow);
-                        (yellow, yellow, Style::default())
-                    }
-                }
-                SessionState::Working => {
-                    let green = if blink {
-                        Color::LightGreen
-                    } else {
-                        Color::Green
-                    };
-                    let gs = Style::default().fg(green);
-                    (gs, gs, Style::default())
-                }
-                SessionState::Done => {
-                    let dim = Style::default().fg(Color::DarkGray);
-                    (dim, dim, dim)
-                }
-                SessionState::Idle => {
-                    let white = Style::default().fg(Color::White);
-                    (white, white, Style::default())
-                }
-            };
+            let (indicator_style, state_style, text_style) = session_row_style(&s.state, blink);
 
             let host_badge = if s.host.is_some() {
                 Span::styled("[R] ", Style::default().fg(Color::Cyan))
@@ -150,12 +171,10 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(session_display_name(s), text_style),
                 Span::raw("  "),
                 Span::styled(s.state.as_str(), state_style),
-                Span::raw("  "),
-                Span::styled(&*s.working_dir, text_style),
             ]);
-            ListItem::new(content)
-        })
-        .collect();
+            items.push(ListItem::new(content));
+        }
+    }
 
     let title = if app.show_untracked {
         " Sessions [untracked] (Enter:attach i:all p:assign ?:help) "
@@ -169,7 +188,7 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
         .highlight_symbol(">> ");
 
     let mut list_state = ListState::default();
-    list_state.select(Some(app.selected_index));
+    list_state.select(highlight_index);
 
     frame.render_stateful_widget(list, area, &mut list_state);
 }

@@ -45,6 +45,13 @@ async fn main() -> io::Result<()> {
 
     let db = open_database();
 
+    // Load projects at startup so sessions can be grouped by project
+    if let Some(db) = &db {
+        if let Ok(projects) = db.list_projects() {
+            app.update_projects(projects);
+        }
+    }
+
     let result = run_event_loop(&mut terminal, &mut app, ipc_client, db.as_ref()).await;
 
     restore_terminal()?;

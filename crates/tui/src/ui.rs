@@ -8,7 +8,7 @@ use crate::project_view;
 use crate::resource_view;
 use crate::review_view;
 use ca_lib::events::EventType;
-use ca_lib::models::SessionState;
+use ca_lib::models::{Session, SessionState};
 use ca_lib::project::Project;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -148,7 +148,7 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(pos, Style::default().fg(Color::DarkGray)),
                 Span::styled(indicator, indicator_style),
                 host_badge,
-                Span::styled(&*s.id, text_style),
+                Span::styled(session_display_name(s), text_style),
                 Span::raw("  "),
                 Span::styled(s.state.as_str(), state_style),
                 Span::raw("  "),
@@ -238,6 +238,21 @@ fn format_event_type(event_type: &EventType) -> String {
         EventType::SessionDiscovered => "session_discovered".to_string(),
         EventType::SessionRemoved => "session_removed".to_string(),
     }
+}
+
+fn session_display_name(session: &Session) -> String {
+    if let Some(step_id) = &session.plan_step_id {
+        return format!("step-{step_id}");
+    }
+    let dir = &session.working_dir;
+    if let Some(basename) = std::path::Path::new(dir).file_name() {
+        if let Some(name) = basename.to_str() {
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    session.id.chars().take(8).collect()
 }
 
 fn state_indicator(state: &SessionState) -> &'static str {

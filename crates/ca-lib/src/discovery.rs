@@ -1,6 +1,8 @@
 use crate::db::{Database, DbError};
 use crate::events::EventType;
-use crate::models::{Session, SessionState};
+use crate::models::Session;
+#[cfg(test)]
+use crate::models::SessionState;
 use crate::state::detect_state;
 use crate::tmux::{
     ClaudeLocation, DetectionMethod, TmuxError, TmuxPane, capture_pane_content, get_pane_process,
@@ -79,26 +81,16 @@ pub fn discover_claude_panes() -> Result<Vec<ClaudeLocation>, DiscoveryError> {
     Ok(locations)
 }
 
-/// Check a single pane for Claude. Tries process name first, then content.
+/// Check a single pane for Claude via process name only.
+///
+/// Content-based fallback was removed because generic patterns like "Reading"
+/// and "Running" caused false positives on non-Claude panes (tview, etc.).
 fn check_pane(pane: &TmuxPane, now: i64) -> Option<ClaudeLocation> {
-    // Try process name detection first
     if let Ok(process) = get_pane_process(&pane.pane_id) {
         if is_claude_process(&process) {
             return Some(ClaudeLocation {
                 pane: pane.clone(),
                 detection_method: DetectionMethod::ProcessName,
-                detected_at: now,
-            });
-        }
-    }
-
-    // Fall back to content-based detection
-    if let Ok(content) = capture_pane_content(&pane.pane_id, CONTENT_CAPTURE_LINES) {
-        let state = detect_state(&content);
-        if state != SessionState::Idle {
-            return Some(ClaudeLocation {
-                pane: pane.clone(),
-                detection_method: DetectionMethod::PaneContent,
                 detected_at: now,
             });
         }

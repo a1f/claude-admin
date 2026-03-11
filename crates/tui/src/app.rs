@@ -19,6 +19,7 @@ pub enum InputMode {
     Command,
     Form,
     Help,
+    SessionReply,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,6 +135,11 @@ pub enum AppAction {
         plan_id: i64,
         hash: String,
     },
+    SendSessionReply {
+        pane_id: String,
+        text: String,
+        host: Option<String>,
+    },
 }
 
 pub struct App {
@@ -193,6 +199,7 @@ pub struct App {
     pub plan_version_index: usize,
     pub plan_version_diff: Vec<ca_lib::plan_version::StepDiff>,
     pub pane_preview_lines: Vec<String>,
+    pub session_reply_input: String,
 }
 
 impl App {
@@ -254,6 +261,7 @@ impl App {
             plan_version_index: 0,
             plan_version_diff: Vec::new(),
             pane_preview_lines: Vec::new(),
+            session_reply_input: String::new(),
         }
     }
 
@@ -446,6 +454,7 @@ impl App {
                     }
                     AppAction::None
                 }
+                InputMode::SessionReply => self.handle_session_reply_key(key),
                 _ => {
                     if key.code == KeyCode::Esc {
                         self.input_mode = InputMode::Normal;
@@ -739,7 +748,52 @@ impl App {
                 self.view_mode = ViewMode::Resources;
                 AppAction::LoadResources
             }
+            KeyCode::Char('t') => {
+                if let Some(session) = self.selected_session() {
+                    if session.state == SessionState::NeedsInput {
+                        self.session_reply_input.clear();
+                        self.input_mode = InputMode::SessionReply;
+                    }
+                }
+                AppAction::None
+            }
             KeyCode::Char('N') => AppAction::OpenForm(FormKind::CreateWorkspace),
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_session_reply_key(&mut self, key: KeyEvent) -> AppAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+                self.session_reply_input.clear();
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                let text = self.session_reply_input.clone();
+                self.session_reply_input.clear();
+                self.input_mode = InputMode::Normal;
+                if text.is_empty() {
+                    return AppAction::None;
+                }
+                if let Some(session) = self.selected_session() {
+                    AppAction::SendSessionReply {
+                        pane_id: session.pane_id.clone(),
+                        text,
+                        host: session.host.clone(),
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Backspace => {
+                self.session_reply_input.pop();
+                AppAction::None
+            }
+            KeyCode::Char(c) => {
+                self.session_reply_input.push(c);
+                AppAction::None
+            }
             _ => AppAction::None,
         }
     }

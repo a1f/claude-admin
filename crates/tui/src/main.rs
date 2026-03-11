@@ -527,6 +527,31 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         AppAction::RestorePlanVersion { plan_id, hash } => {
             restore_plan_version(app, db, plan_id, &hash);
         }
+        AppAction::SendSessionReply {
+            pane_id,
+            text,
+            host,
+        } => {
+            let escaped = ca_lib::review::escape_for_tmux(&text);
+            if let Some(hostname) = host {
+                // Remote session: try to find the host config
+                if let Some(db) = db {
+                    if let Ok(hosts) = db.list_remote_hosts() {
+                        if let Some(rh) = hosts.iter().find(|h| h.hostname == hostname) {
+                            let _ = ca_lib::remote::send_remote_keys(rh, &pane_id, &escaped);
+                            app.set_status("Reply sent (remote)");
+                            return;
+                        }
+                    }
+                }
+                app.set_status("Remote host not found");
+            } else {
+                let _ = std::process::Command::new("tmux")
+                    .args(["send-keys", "-t", &pane_id, &escaped, "Enter"])
+                    .status();
+                app.set_status("Reply sent");
+            }
+        }
         // Handled in run_event_loop before reaching handle_action
         AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {}
     }

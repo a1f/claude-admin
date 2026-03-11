@@ -79,10 +79,22 @@ fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    let in_reply = app.input_mode == InputMode::SessionReply;
+    let main_area = if in_reply {
+        let vert = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .split(area);
+        draw_reply_bar(frame, app, vert[1]);
+        vert[0]
+    } else {
+        area
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(33), Constraint::Percentage(67)])
-        .split(area);
+        .split(main_area);
 
     draw_session_list(frame, app, chunks[0]);
     draw_preview(frame, app, chunks[1]);
@@ -230,6 +242,17 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     frame.render_widget(preview, area);
+}
+
+fn draw_reply_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let display = format!("Reply> {}", app.session_reply_input);
+    let bar = Paragraph::new(display).block(
+        Block::default()
+            .title(" Reply to session (Enter:send Esc:cancel) ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+    frame.render_widget(bar, area);
 }
 
 fn session_display_name(session: &Session) -> String {

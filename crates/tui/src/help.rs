@@ -14,7 +14,7 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
     match view_mode {
         ViewMode::Sessions => {
             entries.extend([
-                ("Enter", "Select session (preview)", ""),
+                ("Enter / a", "Jump to tmux pane", "tmux select-pane"),
                 ("1-9", "Quick-switch to session", ""),
                 ("Tab / n", "Next needs-input session", ""),
                 ("p", "Switch to Projects view", "ca project list"),

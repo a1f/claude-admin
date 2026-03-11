@@ -665,9 +665,9 @@ impl App {
                 AppAction::None
             }
             KeyCode::Tab | KeyCode::Char('n') => self.next_needs_input(),
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char('a') => {
                 if let Some(session) = self.selected_session() {
-                    AppAction::SelectSession(session.id.clone())
+                    AppAction::AttachSession(session.pane_id.clone())
                 } else {
                     AppAction::None
                 }
@@ -1679,15 +1679,27 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_key_enter_returns_session_id() {
+    fn test_handle_key_enter_attaches_session() {
         let mut app = App::new();
         app.update_sessions(vec![make_session("sess-1"), make_session("sess-2")]);
         app.select_next();
 
         let action = app.handle_key(key(KeyCode::Enter));
         match action {
-            AppAction::SelectSession(id) => assert_eq!(id, "sess-2"),
-            _ => panic!("expected SelectSession"),
+            AppAction::AttachSession(pane_id) => assert_eq!(pane_id, "%0"),
+            _ => panic!("expected AttachSession"),
+        }
+    }
+
+    #[test]
+    fn test_handle_key_a_attaches_session() {
+        let mut app = App::new();
+        app.update_sessions(vec![make_session("sess-1")]);
+
+        let action = app.handle_key(key(KeyCode::Char('a')));
+        match action {
+            AppAction::AttachSession(pane_id) => assert_eq!(pane_id, "%0"),
+            _ => panic!("expected AttachSession"),
         }
     }
 

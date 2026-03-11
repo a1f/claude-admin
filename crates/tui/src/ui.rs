@@ -158,9 +158,9 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let title = if app.show_untracked {
-        " Sessions [untracked] (i:all p:assign N:new-ws ?:help) "
+        " Sessions [untracked] (Enter:attach i:all p:assign ?:help) "
     } else {
-        " Sessions (p:projects i:untracked N:new-ws ?:help) "
+        " Sessions (Enter:attach p:projects i:untracked ?:help) "
     };
 
     let list = List::new(items)
@@ -290,7 +290,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let left_hints = match app.view_mode {
-        ViewMode::Sessions => "p:projects i:filter N:new-ws ?:help",
+        ViewMode::Sessions => "Enter/a:attach p:projects i:filter ?:help",
         ViewMode::Projects => "n:new d:del b:back ?:help",
         ViewMode::Plans => "n:new d:del b:back ?:help",
         ViewMode::PlanDetail => "s:status o:orch b:back ?:help",

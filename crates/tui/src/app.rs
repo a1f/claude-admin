@@ -1,4 +1,5 @@
 use crate::command_palette::CommandPalette;
+use crate::doc_view::DocComment;
 use crate::form::{FormKind, FormOverlay};
 use crate::resource_view::{ResourceSort, SessionResourceRow, TimeFilter};
 use ca_lib::events::Event;
@@ -30,6 +31,7 @@ pub enum ViewMode {
     Review,
     Git,
     Resources,
+    Document,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +117,16 @@ pub enum AppAction {
         repo_path: String,
         commit: String,
     },
+    OpenDocument(String),
+    AddDocComment {
+        line: u32,
+        body: String,
+    },
+    ResolveDocComment(usize),
+    SendDocFeedback {
+        session_id: String,
+        feedback: String,
+    },
 }
 
 pub struct App {
@@ -160,6 +172,16 @@ pub struct App {
     pub resource_project_summary: ResourceSummary,
     pub resource_time_filter: TimeFilter,
     pub resource_sort: ResourceSort,
+    pub doc_lines: Option<Vec<String>>,
+    pub doc_path: Option<String>,
+    pub doc_error: Option<String>,
+    pub doc_scroll: u16,
+    pub doc_comments: Vec<DocComment>,
+    pub doc_comment_index: usize,
+    pub doc_comment_mode: bool,
+    pub doc_comment_input: crate::input::TextInput,
+    pub doc_comment_line: Option<u32>,
+    pub doc_session_id: Option<String>,
 }
 
 impl App {
@@ -207,6 +229,16 @@ impl App {
             resource_project_summary: ResourceSummary::default(),
             resource_time_filter: TimeFilter::All,
             resource_sort: ResourceSort::Tokens,
+            doc_lines: None,
+            doc_path: None,
+            doc_error: None,
+            doc_scroll: 0,
+            doc_comments: Vec::new(),
+            doc_comment_index: 0,
+            doc_comment_mode: false,
+            doc_comment_input: crate::input::TextInput::new("Comment"),
+            doc_comment_line: None,
+            doc_session_id: None,
         }
     }
 
@@ -396,6 +428,9 @@ impl App {
         if self.review_comment_mode {
             return self.handle_review_comment_key(key);
         }
+        if self.doc_comment_mode {
+            return self.handle_doc_comment_key(key);
+        }
 
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
@@ -420,6 +455,7 @@ impl App {
                 ViewMode::Review => self.handle_review_key(key),
                 ViewMode::Git => self.handle_git_key(key.code),
                 ViewMode::Resources => self.handle_resources_key(key.code),
+                ViewMode::Document => self.handle_document_key(key.code),
             },
         }
     }
@@ -1096,6 +1132,129 @@ impl App {
         }
     }
 
+    pub fn clear_doc_state(&mut self) {
+        self.doc_lines = None;
+        self.doc_path = None;
+        self.doc_error = None;
+        self.doc_scroll = 0;
+        self.doc_comments.clear();
+        self.doc_comment_index = 0;
+        self.doc_session_id = None;
+    }
+
+    fn handle_document_key(&mut self, code: KeyCode) -> AppAction {
+        if self.doc_lines.is_none() {
+            if code == KeyCode::Char('b') {
+                self.view_mode = ViewMode::Sessions;
+            }
+            return AppAction::None;
+        }
+
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.doc_scroll = self.doc_scroll.saturating_add(1);
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.doc_scroll = self.doc_scroll.saturating_sub(1);
+                AppAction::None
+            }
+            KeyCode::Char('c') => {
+                self.doc_comment_mode = true;
+                self.doc_comment_line = Some(self.doc_scroll as u32 + 1);
+                self.doc_comment_input.clear();
+                AppAction::None
+            }
+            KeyCode::Char('n') => {
+                if !self.doc_comments.is_empty() {
+                    self.doc_comment_index = (self.doc_comment_index + 1) % self.doc_comments.len();
+                    let line = self.doc_comments[self.doc_comment_index].line;
+                    self.doc_scroll = line.saturating_sub(1) as u16;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('p') => {
+                if !self.doc_comments.is_empty() {
+                    self.doc_comment_index = if self.doc_comment_index == 0 {
+                        self.doc_comments.len() - 1
+                    } else {
+                        self.doc_comment_index - 1
+                    };
+                    let line = self.doc_comments[self.doc_comment_index].line;
+                    self.doc_scroll = line.saturating_sub(1) as u16;
+                }
+                AppAction::None
+            }
+            KeyCode::Char('r') => {
+                if !self.doc_comments.is_empty() {
+                    AppAction::ResolveDocComment(self.doc_comment_index)
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('S') => {
+                if let Some(ref session_id) = self.doc_session_id {
+                    let feedback = format_doc_feedback(
+                        self.doc_path.as_deref().unwrap_or("unknown"),
+                        &self.doc_comments,
+                    );
+                    AppAction::SendDocFeedback {
+                        session_id: session_id.clone(),
+                        feedback,
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::Sessions;
+                self.clear_doc_state();
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_doc_comment_key(&mut self, key: KeyEvent) -> AppAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.doc_comment_mode = false;
+                self.doc_comment_line = None;
+                self.doc_comment_input.clear();
+                AppAction::None
+            }
+            KeyCode::Enter => {
+                let body = self.doc_comment_input.value().to_string();
+                if body.is_empty() {
+                    self.doc_comment_mode = false;
+                    self.doc_comment_line = None;
+                    return AppAction::None;
+                }
+
+                let line = self.doc_comment_line.unwrap_or(1);
+
+                self.doc_comment_mode = false;
+                self.doc_comment_line = None;
+                self.doc_comment_input.clear();
+
+                AppAction::AddDocComment { line, body }
+            }
+            KeyCode::Backspace => {
+                self.doc_comment_input.backspace();
+                AppAction::None
+            }
+            KeyCode::Delete => {
+                self.doc_comment_input.delete_char();
+                AppAction::None
+            }
+            KeyCode::Char(c) => {
+                self.doc_comment_input.insert_char(c);
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
     fn handle_review_comment_key(&mut self, key: KeyEvent) -> AppAction {
         match key.code {
             KeyCode::Esc => {
@@ -1238,6 +1397,18 @@ pub fn cycle_step_status(status: StepStatus) -> StepStatus {
         StepStatus::Blocked => StepStatus::Skipped,
         StepStatus::Skipped => StepStatus::Pending,
     }
+}
+
+pub fn format_doc_feedback(path: &str, comments: &[DocComment]) -> String {
+    let mut active = comments.iter().filter(|c| !c.resolved).peekable();
+    if active.peek().is_none() {
+        return String::new();
+    }
+    let mut out = format!("Document feedback for {path}:\n");
+    for c in active {
+        out.push_str(&format!("  Line {}: {}\n", c.line, c.body));
+    }
+    out
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 use crate::app::{App, InputMode, ViewMode};
 use crate::command_palette::CommandPalette;
+use crate::doc_view;
 use crate::form::FormOverlay;
 use crate::git_view;
 use crate::plan_view;
@@ -36,6 +37,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ViewMode::Review => review_view::draw_review(frame, app, main_area),
         ViewMode::Git => git_view::draw_git(frame, app, main_area),
         ViewMode::Resources => resource_view::draw_resources(frame, app, main_area),
+        ViewMode::Document => doc_view::draw_document(frame, app, main_area),
     }
 
     if app.input_mode == InputMode::Command {
@@ -307,6 +309,9 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Review => "j/k:scroll n/p:hunk h/l:file c:comment b:back ?:help",
         ViewMode::Git => "j/k:commits Enter:diff n/p:scroll h/l:file b:back ?:help",
         ViewMode::Resources => "j/k:navigate t:time-filter s:sort b:back ?:help",
+        ViewMode::Document => {
+            "j/k:scroll c:comment n/p:nav-comments r:resolve S:send b:back ?:help"
+        }
     };
 
     let left = Span::styled(
@@ -506,6 +511,7 @@ fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Review => "Review",
         ViewMode::Git => "Git",
         ViewMode::Resources => "Resources",
+        ViewMode::Document => "Document",
     };
 
     let block = Block::default()

@@ -91,6 +91,16 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("b", "Back to Sessions", ""),
             ]);
         }
+        ViewMode::Document => {
+            entries.extend([
+                ("j / k", "Scroll document", ""),
+                ("c", "Add comment at line", ""),
+                ("n / p", "Next/previous comment", ""),
+                ("r", "Resolve comment", ""),
+                ("S", "Send feedback to session", "tmux send-keys"),
+                ("b", "Back to Sessions", ""),
+            ]);
+        }
     }
 
     entries
@@ -167,6 +177,7 @@ mod tests {
             ViewMode::Review,
             ViewMode::Git,
             ViewMode::Resources,
+            ViewMode::Document,
         ] {
             let content = help_content(mode);
             assert!(

@@ -1,6 +1,7 @@
 mod app;
 mod command_palette;
 mod commands;
+mod doc_view;
 mod form;
 mod git_view;
 mod help;
@@ -468,6 +469,29 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 load_resources(app, db);
             }
         }
+        AppAction::OpenDocument(path) => {
+            load_document(app, &path);
+        }
+        AppAction::AddDocComment { line, body } => {
+            app.doc_comments.push(doc_view::DocComment {
+                line,
+                body,
+                resolved: false,
+            });
+            app.set_status(format!("Comment added at line {line}"));
+        }
+        AppAction::ResolveDocComment(idx) => {
+            if let Some(comment) = app.doc_comments.get_mut(idx) {
+                comment.resolved = true;
+                app.set_status("Comment resolved");
+            }
+        }
+        AppAction::SendDocFeedback {
+            session_id,
+            feedback,
+        } => {
+            send_doc_feedback(app, db, &session_id, &feedback);
+        }
         // Handled in run_event_loop before reaching handle_action
         AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {}
     }
@@ -543,6 +567,48 @@ fn load_resources(app: &mut App, db: &Database) {
     app.resource_rows = rows;
     app.resource_index = 0;
     app.resource_project_summary = total;
+}
+
+fn load_document(app: &mut App, path: &str) {
+    app.clear_doc_state();
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            app.doc_lines = Some(content.lines().map(String::from).collect());
+        }
+        Err(e) => {
+            app.doc_error = Some(format!("{e}"));
+        }
+    }
+    app.doc_path = Some(path.to_string());
+    app.view_mode = app::ViewMode::Document;
+}
+
+fn send_doc_feedback(app: &mut App, db: Option<&Database>, session_id: &str, feedback: &str) {
+    if feedback.is_empty() {
+        app.set_status("No comments to send");
+        return;
+    }
+
+    let Some(db) = db else {
+        app.set_status("No database");
+        return;
+    };
+
+    let session = match db.get_session(session_id) {
+        Ok(Some(s)) => s,
+        _ => {
+            app.set_status("Session not found");
+            return;
+        }
+    };
+
+    let escaped = ca_lib::review::escape_for_tmux(feedback);
+    let _ = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &session.pane_id, &escaped, "Enter"])
+        .status();
+
+    let count = app.doc_comments.iter().filter(|c| !c.resolved).count();
+    app.set_status(format!("Doc feedback sent ({count} comments)"));
 }
 
 fn resolve_review_repo_path(app: &App, db: Option<&Database>) -> Option<String> {

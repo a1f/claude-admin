@@ -22,6 +22,7 @@ pub fn parse_command(input: &str) -> Result<AppAction, String> {
         "ws" | "workspace" => parse_ws_command(&parts[1..]),
         "proj" | "project" => parse_proj_command(&parts[1..]),
         "plan" => parse_plan_command(&parts[1..]),
+        "doc" | "document" => parse_doc_command(&parts[1..]),
         "help" | "?" => Ok(AppAction::ShowHelp),
         "q" | "quit" => Ok(AppAction::Quit),
         _ => Err(format!("Unknown command: {}", parts[0])),
@@ -88,6 +89,14 @@ fn parse_plan_command(args: &[&str]) -> Result<AppAction, String> {
         }
         _ => Err(format!("Unknown plan subcommand: {}", args[0])),
     }
+}
+
+fn parse_doc_command(args: &[&str]) -> Result<AppAction, String> {
+    if args.is_empty() {
+        return Err("Usage: doc <path>".to_string());
+    }
+    let path = args.join(" ");
+    Ok(AppAction::OpenDocument(path))
 }
 
 fn parse_id(args: &[&str], usage_prefix: &str) -> Result<i64, String> {

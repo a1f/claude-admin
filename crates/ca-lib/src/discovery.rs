@@ -43,6 +43,11 @@ pub fn is_claude_process(process_name: &str) -> bool {
 
     let lower = trimmed.to_lowercase();
 
+    // Exclude our own binaries (claude-admin TUI, CLI, daemon)
+    if lower.starts_with("claude-admin") {
+        return false;
+    }
+
     // Direct claude match (covers "claude", "claude-code", etc.)
     if lower.contains("claude") {
         return true;

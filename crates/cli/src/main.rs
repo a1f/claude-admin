@@ -452,7 +452,7 @@ fn handle_hooks(command: HooksCommand) -> Result<(), CliError> {
 
 fn open_db() -> Result<Database, CliError> {
     let data = data_dir()?;
-    let db_path = data.join("claude-admin.db");
+    let db_path = data.join("sessions.db");
     Ok(Database::open(&db_path)?)
 }
 

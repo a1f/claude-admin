@@ -66,7 +66,7 @@ fn restore_terminal() -> io::Result<()> {
 
 fn open_database() -> Option<Database> {
     let home = dirs::home_dir()?;
-    let db_path = home.join(".claude-admin").join("claude-admin.db");
+    let db_path = home.join(".claude-admin").join("sessions.db");
     Database::open(&db_path).ok()
 }
 

@@ -192,6 +192,7 @@ pub struct App {
     pub plan_versions: Vec<ca_lib::plan_version::PlanVersion>,
     pub plan_version_index: usize,
     pub plan_version_diff: Vec<ca_lib::plan_version::StepDiff>,
+    pub pane_preview_lines: Vec<String>,
 }
 
 impl App {
@@ -252,6 +253,7 @@ impl App {
             plan_versions: Vec::new(),
             plan_version_index: 0,
             plan_version_diff: Vec::new(),
+            pane_preview_lines: Vec::new(),
         }
     }
 
@@ -367,6 +369,7 @@ impl App {
         }
         self.selected_index = (self.selected_index + 1) % count;
         self.preview_events.clear();
+        self.pane_preview_lines.clear();
     }
 
     pub fn select_prev(&mut self) {
@@ -380,6 +383,7 @@ impl App {
             self.selected_index -= 1;
         }
         self.preview_events.clear();
+        self.pane_preview_lines.clear();
     }
 
     pub fn selected_session(&self) -> Option<&Session> {

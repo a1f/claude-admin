@@ -86,6 +86,7 @@ async fn run_event_loop(
     loop {
         app.clear_stale_status();
         app.tick();
+        refresh_pane_preview(app);
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if event::poll(Duration::ZERO)? {
@@ -118,6 +119,22 @@ async fn run_event_loop(
         if app.should_quit {
             return Ok(());
         }
+    }
+}
+
+fn refresh_pane_preview(app: &mut App) {
+    if app.view_mode != app::ViewMode::Sessions {
+        return;
+    }
+    // Refresh every ~10 ticks (~500ms) or when empty (just selected)
+    if !app.pane_preview_lines.is_empty() && app.tick_count % 10 != 0 {
+        return;
+    }
+    let Some(session) = app.selected_session().cloned() else {
+        return;
+    };
+    if let Ok(content) = ca_lib::tmux::capture_pane_content(&session.pane_id, 50) {
+        app.pane_preview_lines = content.lines().map(String::from).collect();
     }
 }
 

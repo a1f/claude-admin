@@ -7,7 +7,6 @@ use crate::plan_view;
 use crate::project_view;
 use crate::resource_view;
 use crate::review_view;
-use ca_lib::events::EventType;
 use ca_lib::models::{Session, SessionState};
 use ca_lib::project::Project;
 use ratatui::Frame;
@@ -15,7 +14,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Wrap,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
 };
 
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -176,68 +175,42 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
-    let content = match app.selected_session() {
-        None => vec![Line::from("No session selected.")],
-        Some(session) => build_preview_lines(app, session),
+    let Some(session) = app.selected_session() else {
+        let empty = Paragraph::new("No session selected.")
+            .block(Block::default().title(" Preview ").borders(Borders::ALL));
+        frame.render_widget(empty, area);
+        return;
     };
 
-    let preview = Paragraph::new(content)
-        .block(Block::default().title(" Preview ").borders(Borders::ALL))
-        .wrap(Wrap { trim: true });
-
-    frame.render_widget(preview, area);
-}
-
-fn build_preview_lines<'a>(app: &'a App, session: &'a ca_lib::models::Session) -> Vec<Line<'a>> {
     let bold = Style::default().add_modifier(Modifier::BOLD);
+    let header = Line::from(vec![
+        Span::styled(session_display_name(session), bold),
+        Span::raw("  "),
+        Span::styled(
+            session.state.as_str(),
+            Style::default().fg(state_color(&session.state)),
+        ),
+        Span::raw("  "),
+        Span::styled(&session.pane_id, Style::default().fg(Color::DarkGray)),
+    ]);
 
-    let mut lines = vec![
-        Line::from(vec![Span::styled("ID: ", bold), Span::raw(&session.id)]),
-        Line::from(vec![
-            Span::styled("State: ", bold),
-            Span::styled(
-                session.state.as_str(),
-                Style::default().fg(state_color(&session.state)),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("Pane: ", bold),
-            Span::raw(&session.pane_id),
-        ]),
-        Line::from(vec![
-            Span::styled("Dir: ", bold),
-            Span::raw(&session.working_dir),
-        ]),
-    ];
+    let mut lines = vec![header, Line::from("")];
 
-    if let Some(host) = &session.host {
-        lines.push(Line::from(vec![
-            Span::styled("Host: ", bold),
-            Span::styled(host.as_str(), Style::default().fg(Color::Cyan)),
-        ]));
-    }
-
-    lines.extend([Line::from(""), Line::styled("--- Events ---", bold)]);
-
-    if app.preview_events.is_empty() {
-        lines.push(Line::from("No events yet."));
+    if app.pane_preview_lines.is_empty() {
+        lines.push(Line::from("Loading pane content..."));
     } else {
-        for event in &app.preview_events {
-            let detail = format_event_type(&event.event_type);
-            lines.push(Line::from(format!("  {} {}", event.id, detail)));
+        for raw_line in &app.pane_preview_lines {
+            lines.push(Line::from(raw_line.as_str()));
         }
     }
 
-    lines
-}
+    let preview = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Pane Output ")
+            .borders(Borders::ALL),
+    );
 
-fn format_event_type(event_type: &EventType) -> String {
-    match event_type {
-        EventType::StateChanged { from, to } => format!("state: {} -> {}", from, to),
-        EventType::HookReceived { hook_type } => format!("hook: {}", hook_type),
-        EventType::SessionDiscovered => "session_discovered".to_string(),
-        EventType::SessionRemoved => "session_removed".to_string(),
-    }
+    frame.render_widget(preview, area);
 }
 
 fn session_display_name(session: &Session) -> String {

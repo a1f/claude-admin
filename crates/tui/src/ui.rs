@@ -332,7 +332,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let left_hints = match app.view_mode {
-        ViewMode::Sessions => "Enter/a:attach p:projects i:filter ?:help",
+        ViewMode::Sessions => "Enter/a:attach t:reply n:next-input p:projects ?:help",
         ViewMode::Projects => "n:new d:del b:back ?:help",
         ViewMode::Plans => "n:new d:del b:back ?:help",
         ViewMode::PlanDetail => "s:status o:orch b:back ?:help",

@@ -17,6 +17,7 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("Enter / a", "Jump to tmux pane", "tmux select-pane"),
                 ("1-9", "Quick-switch to session", ""),
                 ("Tab / n", "Next needs-input session", ""),
+                ("t", "Type reply to session", "tmux send-keys"),
                 ("p", "Switch to Projects view", "ca project list"),
                 ("r", "Open review for session", ""),
                 ("g", "Git commit stack", "git log"),

@@ -51,6 +51,7 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                     "ca plan step <id> <step> <status>",
                 ),
                 ("o", "Open orchestrator", ""),
+                ("h", "Plan version history", ""),
                 ("b", "Back to Plans", ""),
             ]);
         }
@@ -99,6 +100,13 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
                 ("r", "Resolve comment", ""),
                 ("S", "Send feedback to session", "tmux send-keys"),
                 ("b", "Back to Sessions", ""),
+            ]);
+        }
+        ViewMode::PlanHistory => {
+            entries.extend([
+                ("j / k", "Navigate versions", ""),
+                ("r", "Restore selected version", ""),
+                ("b", "Back to Plan Detail", ""),
             ]);
         }
     }
@@ -178,6 +186,7 @@ mod tests {
             ViewMode::Git,
             ViewMode::Resources,
             ViewMode::Document,
+            ViewMode::PlanHistory,
         ] {
             let content = help_content(mode);
             assert!(

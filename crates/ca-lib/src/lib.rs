@@ -13,6 +13,7 @@ pub mod models;
 pub mod notify;
 pub mod orchestrator;
 pub mod plan;
+pub mod plan_version;
 pub mod project;
 pub mod remote;
 pub mod resource;

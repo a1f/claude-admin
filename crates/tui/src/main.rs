@@ -492,6 +492,17 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
         } => {
             send_doc_feedback(app, db, &session_id, &feedback);
         }
+        AppAction::LoadPlanHistory(plan_id) => {
+            load_plan_history(app, plan_id);
+        }
+        AppAction::RefreshPlanDiff(plan_id) => {
+            if let Ok(repo_root) = ca_lib::plan_version::find_repo_root(std::path::Path::new(".")) {
+                compute_version_diff(app, &repo_root, plan_id, app.plan_version_index);
+            }
+        }
+        AppAction::RestorePlanVersion { plan_id, hash } => {
+            restore_plan_version(app, db, plan_id, &hash);
+        }
         // Handled in run_event_loop before reaching handle_action
         AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {}
     }
@@ -609,6 +620,90 @@ fn send_doc_feedback(app: &mut App, db: Option<&Database>, session_id: &str, fee
 
     let count = app.doc_comments.iter().filter(|c| !c.resolved).count();
     app.set_status(format!("Doc feedback sent ({count} comments)"));
+}
+
+fn load_plan_history(app: &mut App, plan_id: i64) {
+    let repo_root = match ca_lib::plan_version::find_repo_root(std::path::Path::new(".")) {
+        Ok(r) => r,
+        Err(_) => {
+            app.set_status("Not in a git repository");
+            return;
+        }
+    };
+
+    match ca_lib::plan_version::list_versions(&repo_root, plan_id) {
+        Ok(versions) => {
+            app.plan_versions = versions;
+            app.plan_version_index = 0;
+            app.plan_version_diff.clear();
+
+            // Compute diff for the first version if there are at least 2
+            if app.plan_versions.len() >= 2 {
+                compute_version_diff(app, &repo_root, plan_id, 0);
+            }
+
+            app.view_mode = app::ViewMode::PlanHistory;
+        }
+        Err(e) => {
+            app.set_status(format!("Failed to load history: {e}"));
+        }
+    }
+}
+
+fn compute_version_diff(app: &mut App, repo_root: &std::path::Path, plan_id: i64, index: usize) {
+    let versions = &app.plan_versions;
+    if index + 1 >= versions.len() {
+        app.plan_version_diff.clear();
+        return;
+    }
+
+    let new_hash = &versions[index].hash;
+    let old_hash = &versions[index + 1].hash;
+
+    let new_content = ca_lib::plan_version::get_version_content(repo_root, plan_id, new_hash);
+    let old_content = ca_lib::plan_version::get_version_content(repo_root, plan_id, old_hash);
+
+    if let (Ok(new_c), Ok(old_c)) = (new_content, old_content) {
+        app.plan_version_diff = ca_lib::plan_version::diff_versions(&old_c, &new_c);
+    } else {
+        app.plan_version_diff.clear();
+    }
+}
+
+fn restore_plan_version(app: &mut App, db: Option<&Database>, plan_id: i64, hash: &str) {
+    let repo_root = match ca_lib::plan_version::find_repo_root(std::path::Path::new(".")) {
+        Ok(r) => r,
+        Err(_) => {
+            app.set_status("Not in a git repository");
+            return;
+        }
+    };
+
+    let content = match ca_lib::plan_version::get_version_content(&repo_root, plan_id, hash) {
+        Ok(c) => c,
+        Err(e) => {
+            app.set_status(format!("Failed to restore: {e}"));
+            return;
+        }
+    };
+
+    let Some(db) = db else {
+        app.set_status("No database");
+        return;
+    };
+
+    if let Err(e) = db.update_plan_content(plan_id, &content) {
+        app.set_status(format!("DB error: {e}"));
+        return;
+    }
+
+    if let Ok(Some(plan)) = db.get_plan(plan_id) {
+        app.update_current_plan(plan);
+    }
+    app.set_status(format!(
+        "Restored plan to version {}",
+        &hash[..7.min(hash.len())]
+    ));
 }
 
 fn resolve_review_repo_path(app: &App, db: Option<&Database>) -> Option<String> {

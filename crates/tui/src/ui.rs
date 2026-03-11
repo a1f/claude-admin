@@ -38,6 +38,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ViewMode::Git => git_view::draw_git(frame, app, main_area),
         ViewMode::Resources => resource_view::draw_resources(frame, app, main_area),
         ViewMode::Document => doc_view::draw_document(frame, app, main_area),
+        ViewMode::PlanHistory => plan_view::draw_plan_history(frame, app, main_area),
     }
 
     if app.input_mode == InputMode::Command {
@@ -312,6 +313,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Document => {
             "j/k:scroll c:comment n/p:nav-comments r:resolve S:send b:back ?:help"
         }
+        ViewMode::PlanHistory => "j/k:navigate r:restore b:back ?:help",
     };
 
     let left = Span::styled(
@@ -512,6 +514,7 @@ fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Git => "Git",
         ViewMode::Resources => "Resources",
         ViewMode::Document => "Document",
+        ViewMode::PlanHistory => "Plan History",
     };
 
     let block = Block::default()

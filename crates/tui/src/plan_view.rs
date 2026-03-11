@@ -234,3 +234,87 @@ pub(crate) fn step_color(status: &StepStatus) -> Color {
         StepStatus::Skipped => Color::DarkGray,
     }
 }
+
+pub fn draw_plan_history(frame: &mut Frame, app: &App, area: Rect) {
+    if app.plan_versions.is_empty() {
+        let msg = Paragraph::new("No version history. Save plan changes to create versions.")
+            .block(
+                Block::default()
+                    .title(" Plan History ")
+                    .borders(Borders::ALL),
+            );
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
+
+    draw_version_list(frame, app, chunks[0]);
+    draw_version_diff(frame, app, chunks[1]);
+}
+
+fn draw_version_list(frame: &mut Frame, app: &App, area: Rect) {
+    let title = format!(" Versions ({}) ", app.plan_versions.len());
+
+    let items: Vec<ListItem> = app
+        .plan_versions
+        .iter()
+        .map(|v| {
+            let content = Line::from(vec![
+                Span::styled(
+                    format!("{} ", v.short_hash),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(&v.date, Style::default().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::raw(&v.message),
+            ]);
+            ListItem::new(content)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_symbol(">> ");
+
+    let mut state = ListState::default();
+    state.select(Some(app.plan_version_index));
+
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_version_diff(frame: &mut Frame, app: &App, area: Rect) {
+    if app.plan_version_diff.is_empty() {
+        let msg = Paragraph::new("No changes in this version.")
+            .block(Block::default().title(" Changes ").borders(Borders::ALL));
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    let lines: Vec<Line> = app
+        .plan_version_diff
+        .iter()
+        .map(|d| {
+            let (label, color) = match (&d.old_status, &d.new_status) {
+                (None, Some(new)) => (format!("+ {} → {}", d.step_id, new), Color::Green),
+                (Some(old), None) => (format!("- {} (was {})", d.step_id, old), Color::Red),
+                (Some(old), Some(new)) => {
+                    (format!("~ {} {} → {}", d.step_id, old, new), Color::Yellow)
+                }
+                (None, None) => (format!("  {}", d.step_id), Color::DarkGray),
+            };
+            Line::styled(label, Style::default().fg(color))
+        })
+        .collect();
+
+    let paragraph = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Step Changes ")
+            .borders(Borders::ALL),
+    );
+    frame.render_widget(paragraph, area);
+}

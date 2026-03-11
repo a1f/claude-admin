@@ -298,11 +298,6 @@ impl Database {
         step_id: &str,
         status: StepStatus,
     ) -> Result<(), DbError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
         let content_str: String = self
             .connection()
             .query_row(
@@ -324,7 +319,16 @@ impl Database {
 
         step.status = status;
 
-        let updated_json = serde_json::to_string(&content)?;
+        self.update_plan_content(plan_id, &content)
+    }
+
+    pub fn update_plan_content(&self, id: i64, content: &PlanContent) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let content_json = serde_json::to_string(content)?;
 
         self.connection().execute(
             r#"
@@ -333,9 +337,8 @@ impl Database {
                 updated_at = ?3
             WHERE id = ?1
             "#,
-            params![plan_id, updated_json, now],
+            params![id, content_json, now],
         )?;
-
         Ok(())
     }
 

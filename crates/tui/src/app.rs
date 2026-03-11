@@ -32,6 +32,7 @@ pub enum ViewMode {
     Git,
     Resources,
     Document,
+    PlanHistory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +128,12 @@ pub enum AppAction {
         session_id: String,
         feedback: String,
     },
+    LoadPlanHistory(i64),
+    RefreshPlanDiff(i64),
+    RestorePlanVersion {
+        plan_id: i64,
+        hash: String,
+    },
 }
 
 pub struct App {
@@ -182,6 +189,9 @@ pub struct App {
     pub doc_comment_input: crate::input::TextInput,
     pub doc_comment_line: Option<u32>,
     pub doc_session_id: Option<String>,
+    pub plan_versions: Vec<ca_lib::plan_version::PlanVersion>,
+    pub plan_version_index: usize,
+    pub plan_version_diff: Vec<ca_lib::plan_version::StepDiff>,
 }
 
 impl App {
@@ -239,6 +249,9 @@ impl App {
             doc_comment_input: crate::input::TextInput::new("Comment"),
             doc_comment_line: None,
             doc_session_id: None,
+            plan_versions: Vec::new(),
+            plan_version_index: 0,
+            plan_version_diff: Vec::new(),
         }
     }
 
@@ -456,6 +469,7 @@ impl App {
                 ViewMode::Git => self.handle_git_key(key.code),
                 ViewMode::Resources => self.handle_resources_key(key.code),
                 ViewMode::Document => self.handle_document_key(key.code),
+                ViewMode::PlanHistory => self.handle_plan_history_key(key.code),
             },
         }
     }
@@ -887,8 +901,59 @@ impl App {
                 self.orch_session_index = 0;
                 AppAction::None
             }
+            KeyCode::Char('h') => {
+                if let Some(plan) = &self.current_plan {
+                    AppAction::LoadPlanHistory(plan.id)
+                } else {
+                    AppAction::None
+                }
+            }
             KeyCode::Char('b') => {
                 self.view_mode = ViewMode::Plans;
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    fn handle_plan_history_key(&mut self, code: KeyCode) -> AppAction {
+        let plan_id = self.current_plan.as_ref().map(|p| p.id);
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.plan_versions.is_empty()
+                    && self.plan_version_index < self.plan_versions.len() - 1
+                {
+                    self.plan_version_index += 1;
+                    if let Some(id) = plan_id {
+                        return AppAction::RefreshPlanDiff(id);
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if self.plan_version_index > 0 {
+                    self.plan_version_index -= 1;
+                    if let Some(id) = plan_id {
+                        return AppAction::RefreshPlanDiff(id);
+                    }
+                }
+                AppAction::None
+            }
+            KeyCode::Char('r') => {
+                if let (Some(plan), Some(version)) = (
+                    &self.current_plan,
+                    self.plan_versions.get(self.plan_version_index),
+                ) {
+                    AppAction::RestorePlanVersion {
+                        plan_id: plan.id,
+                        hash: version.hash.clone(),
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
+            KeyCode::Char('b') => {
+                self.view_mode = ViewMode::PlanDetail;
                 AppAction::None
             }
             _ => AppAction::None,

@@ -200,6 +200,7 @@ pub struct App {
     pub plan_version_diff: Vec<ca_lib::plan_version::StepDiff>,
     pub pane_preview_lines: Vec<String>,
     pub pane_preview_scroll: u16,
+    pub pane_preview_pinned: bool,
     pub session_reply_input: String,
 }
 
@@ -263,6 +264,7 @@ impl App {
             plan_version_diff: Vec::new(),
             pane_preview_lines: Vec::new(),
             pane_preview_scroll: 0,
+            pane_preview_pinned: true,
             session_reply_input: String::new(),
         }
     }
@@ -381,6 +383,7 @@ impl App {
         self.preview_events.clear();
         self.pane_preview_lines.clear();
         self.pane_preview_scroll = 0;
+        self.pane_preview_pinned = true;
     }
 
     pub fn select_prev(&mut self) {
@@ -396,6 +399,7 @@ impl App {
         self.preview_events.clear();
         self.pane_preview_lines.clear();
         self.pane_preview_scroll = 0;
+        self.pane_preview_pinned = true;
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
@@ -700,14 +704,18 @@ impl App {
                 AppAction::None
             }
             KeyCode::Char('J') => {
-                // Scroll preview down
+                // Scroll preview down; re-pin if at bottom
                 let max = self.pane_preview_lines.len().saturating_sub(5) as u16;
                 self.pane_preview_scroll = (self.pane_preview_scroll + 5).min(max);
+                if self.pane_preview_scroll >= max {
+                    self.pane_preview_pinned = true;
+                }
                 AppAction::None
             }
             KeyCode::Char('K') => {
-                // Scroll preview up
+                // Scroll preview up; unpin from bottom
                 self.pane_preview_scroll = self.pane_preview_scroll.saturating_sub(5);
+                self.pane_preview_pinned = false;
                 AppAction::None
             }
             KeyCode::Char('y') => {

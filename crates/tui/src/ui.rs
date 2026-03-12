@@ -235,14 +235,12 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let scroll_hint = if app.pane_preview_scroll > 0 {
-        format!(
-            " Pane Output (J/K scroll, line {}) ",
-            app.pane_preview_scroll
-        )
+    let pin_indicator = if app.pane_preview_pinned {
+        "LIVE"
     } else {
-        " Pane Output (J/K scroll, y:approve, t:reply) ".to_string()
+        "PAUSED"
     };
+    let scroll_hint = format!(" Pane [{pin_indicator}] (K:up J:down y:approve t:reply) ");
 
     let preview = Paragraph::new(lines)
         .block(Block::default().title(scroll_hint).borders(Borders::ALL))

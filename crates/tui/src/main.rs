@@ -142,6 +142,10 @@ fn refresh_pane_preview(app: &mut App) {
     };
     if let Ok(content) = ca_lib::tmux::capture_pane_content(&session.pane_id, 200) {
         app.pane_preview_lines = content.lines().map(String::from).collect();
+        // Auto-scroll to bottom when pinned (default behavior)
+        if app.pane_preview_pinned {
+            app.pane_preview_scroll = app.pane_preview_lines.len().saturating_sub(5) as u16;
+        }
     }
 }
 

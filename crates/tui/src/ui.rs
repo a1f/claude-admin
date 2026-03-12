@@ -235,11 +235,18 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let preview = Paragraph::new(lines).block(
-        Block::default()
-            .title(" Pane Output ")
-            .borders(Borders::ALL),
-    );
+    let scroll_hint = if app.pane_preview_scroll > 0 {
+        format!(
+            " Pane Output (J/K scroll, line {}) ",
+            app.pane_preview_scroll
+        )
+    } else {
+        " Pane Output (J/K scroll, y:approve, t:reply) ".to_string()
+    };
+
+    let preview = Paragraph::new(lines)
+        .block(Block::default().title(scroll_hint).borders(Borders::ALL))
+        .scroll((app.pane_preview_scroll, 0));
 
     frame.render_widget(preview, area);
 }

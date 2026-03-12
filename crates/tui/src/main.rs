@@ -140,7 +140,7 @@ fn refresh_pane_preview(app: &mut App) {
     let Some(session) = app.selected_session().cloned() else {
         return;
     };
-    if let Ok(content) = ca_lib::tmux::capture_pane_content(&session.pane_id, 50) {
+    if let Ok(content) = ca_lib::tmux::capture_pane_content(&session.pane_id, 200) {
         app.pane_preview_lines = content.lines().map(String::from).collect();
     }
 }

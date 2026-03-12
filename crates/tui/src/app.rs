@@ -199,6 +199,7 @@ pub struct App {
     pub plan_version_index: usize,
     pub plan_version_diff: Vec<ca_lib::plan_version::StepDiff>,
     pub pane_preview_lines: Vec<String>,
+    pub pane_preview_scroll: u16,
     pub session_reply_input: String,
 }
 
@@ -261,6 +262,7 @@ impl App {
             plan_version_index: 0,
             plan_version_diff: Vec::new(),
             pane_preview_lines: Vec::new(),
+            pane_preview_scroll: 0,
             session_reply_input: String::new(),
         }
     }
@@ -378,6 +380,7 @@ impl App {
         self.selected_index = (self.selected_index + 1) % count;
         self.preview_events.clear();
         self.pane_preview_lines.clear();
+        self.pane_preview_scroll = 0;
     }
 
     pub fn select_prev(&mut self) {
@@ -392,6 +395,7 @@ impl App {
         }
         self.preview_events.clear();
         self.pane_preview_lines.clear();
+        self.pane_preview_scroll = 0;
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
@@ -693,6 +697,30 @@ impl App {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.select_prev();
+                AppAction::None
+            }
+            KeyCode::Char('J') => {
+                // Scroll preview down
+                let max = self.pane_preview_lines.len().saturating_sub(5) as u16;
+                self.pane_preview_scroll = (self.pane_preview_scroll + 5).min(max);
+                AppAction::None
+            }
+            KeyCode::Char('K') => {
+                // Scroll preview up
+                self.pane_preview_scroll = self.pane_preview_scroll.saturating_sub(5);
+                AppAction::None
+            }
+            KeyCode::Char('y') => {
+                // Quick-approve: send "y" + Enter to the selected session
+                if let Some(session) = self.selected_session() {
+                    if session.state == SessionState::NeedsInput {
+                        return AppAction::SendSessionReply {
+                            pane_id: session.pane_id.clone(),
+                            text: "y".to_string(),
+                            host: session.host.clone(),
+                        };
+                    }
+                }
                 AppAction::None
             }
             KeyCode::Char(c @ '1'..='9') => {

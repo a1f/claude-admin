@@ -75,6 +75,8 @@ fn is_needs_input(recent_content: &str, full_content: &str) -> bool {
         "[y/N]",
         "Enter to continue",
         "Press Enter",
+        "Esc to cancel",
+        "Do you want to proceed",
     ];
 
     if input_patterns.iter().any(|p| recent_content.contains(p)) {
@@ -263,6 +265,12 @@ mod tests {
     fn test_mid_tool_execution() {
         let content = "I'll search for that pattern.\n\n╭─ Grep ──────────────────────────────────────────────────╮\n│ Searching for \"SessionState\" in src/                    │\n│ ...";
         assert_eq!(detect_state(content), SessionState::Working);
+    }
+
+    #[test]
+    fn test_claude_permission_prompt_detected() {
+        let content = "Bash command\n\n  ls /some/path 2>/dev/null\n  Check if prompts are installed\n\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, allow reading from lib/\n  3. No\n\nEsc to cancel · Tab to amend · ctrl+e to explain";
+        assert_eq!(detect_state(content), SessionState::NeedsInput);
     }
 
     #[test]

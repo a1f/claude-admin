@@ -93,7 +93,7 @@ fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(33), Constraint::Percentage(67)])
+        .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
         .split(main_area);
 
     draw_session_list(frame, app, chunks[0]);
@@ -189,9 +189,9 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = if app.show_untracked {
-        " Sessions [untracked] (Enter:attach i:all p:assign ?:help) "
+        " Sessions [untracked] (y:approve n:reject t:reply i:all ?:help) "
     } else {
-        " Sessions (Enter:attach p:projects i:untracked ?:help) "
+        " Sessions (y:approve n:reject t:reply p:projects ?:help) "
     };
 
     let list = List::new(items)
@@ -213,6 +213,16 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
+    let pin_indicator = if app.pane_preview_pinned {
+        "LIVE"
+    } else {
+        "PAUSED"
+    };
+    let scroll_hint = format!(" Pane [{pin_indicator}] (K:up J:down y:approve t:reply) ");
+
+    let block = Block::default().title(scroll_hint).borders(Borders::ALL);
+    let inner_height = block.inner(area).height as usize;
+
     let bold = Style::default().add_modifier(Modifier::BOLD);
     let header = Line::from(vec![
         Span::styled(session_display_name(session), bold),
@@ -225,6 +235,7 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(&session.pane_id, Style::default().fg(Color::DarkGray)),
     ]);
 
+    // Header (name + state) + blank separator
     let mut lines = vec![header, Line::from("")];
 
     if app.pane_preview_lines.is_empty() {
@@ -235,16 +246,21 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let pin_indicator = if app.pane_preview_pinned {
-        "LIVE"
+    // When pinned and content is shorter than viewport, pad top to
+    // push content to the bottom of the pane.
+    let scroll = if app.pane_preview_pinned && lines.len() < inner_height {
+        0_u16
     } else {
-        "PAUSED"
+        app.pane_preview_scroll
     };
-    let scroll_hint = format!(" Pane [{pin_indicator}] (K:up J:down y:approve t:reply) ");
 
-    let preview = Paragraph::new(lines)
-        .block(Block::default().title(scroll_hint).borders(Borders::ALL))
-        .scroll((app.pane_preview_scroll, 0));
+    // Insert padding so short content sits at the bottom
+    if app.pane_preview_pinned && lines.len() < inner_height {
+        let padding = inner_height - lines.len();
+        lines.splice(2..2, (0..padding).map(|_| Line::from("")));
+    }
+
+    let preview = Paragraph::new(lines).block(block).scroll((scroll, 0));
 
     frame.render_widget(preview, area);
 }

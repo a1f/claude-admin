@@ -17,7 +17,7 @@ use ca_lib::db::Database;
 use ca_lib::ipc::{IpcClient, Request, Response};
 use ca_lib::plan::PlanContent;
 use crossterm::{
-    event::{self, Event, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -35,7 +35,7 @@ async fn main() -> io::Result<()> {
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -60,7 +60,7 @@ async fn main() -> io::Result<()> {
 
 fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
     Ok(())
 }
 
@@ -97,8 +97,8 @@ async fn run_event_loop(
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if event::poll(Duration::ZERO)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let action = app.handle_key(key);
                     match &action {
                         AppAction::OpenVimdiff { .. } | AppAction::OpenDelta { .. } => {
@@ -107,6 +107,12 @@ async fn run_event_loop(
                         _ => handle_action(action, app, db),
                     }
                 }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollDown => app.scroll_preview_down(3),
+                    MouseEventKind::ScrollUp => app.scroll_preview_up(3),
+                    _ => {}
+                },
+                _ => {}
             }
         } else if let Some(client) = ipc_client.as_mut() {
             match tokio::time::timeout(Duration::from_millis(50), client.recv_response()).await {
@@ -142,9 +148,21 @@ fn refresh_pane_preview(app: &mut App) {
     };
     if let Ok(content) = ca_lib::tmux::capture_pane_content(&session.pane_id, 200) {
         app.pane_preview_lines = content.lines().map(String::from).collect();
-        // Auto-scroll to bottom when pinned (default behavior)
+        // Auto-scroll to bottom when pinned.
+        // +2 accounts for header line + blank separator in draw_preview.
         if app.pane_preview_pinned {
-            app.pane_preview_scroll = app.pane_preview_lines.len().saturating_sub(5) as u16;
+            let total = app.pane_preview_lines.len() + 2;
+            // Inner height ≈ terminal rows - status bar(1) - top/bottom borders(2)
+            let inner = crossterm::terminal::size()
+                .map(|(_, h)| h as usize)
+                .unwrap_or(40)
+                .saturating_sub(3);
+            if total > inner {
+                app.pane_preview_scroll = (total - inner) as u16;
+            } else {
+                // Short content — padding in draw_preview handles alignment
+                app.pane_preview_scroll = 0;
+            }
         }
     }
 }
@@ -554,6 +572,35 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                     .args(["send-keys", "-t", &pane_id, &escaped, "Enter"])
                     .status();
                 app.set_status("Reply sent");
+            }
+        }
+        AppAction::SendSessionKeys {
+            pane_id,
+            keys,
+            host,
+        } => {
+            if let Some(hostname) = host {
+                if let Some(db) = db {
+                    if let Ok(hosts) = db.list_remote_hosts() {
+                        if let Some(rh) = hosts.iter().find(|h| h.hostname == hostname) {
+                            // Send each key individually for remote
+                            for k in &keys {
+                                let _ = ca_lib::remote::send_remote_keys(rh, &pane_id, k);
+                            }
+                            app.set_status("Keys sent (remote)");
+                            return;
+                        }
+                    }
+                }
+                app.set_status("Remote host not found");
+            } else {
+                let mut cmd = std::process::Command::new("tmux");
+                cmd.arg("send-keys").arg("-t").arg(&pane_id);
+                for k in &keys {
+                    cmd.arg(k);
+                }
+                let _ = cmd.status();
+                app.set_status("Keys sent");
             }
         }
         // Handled in run_event_loop before reaching handle_action

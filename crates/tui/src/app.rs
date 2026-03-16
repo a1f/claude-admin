@@ -140,6 +140,11 @@ pub enum AppAction {
         text: String,
         host: Option<String>,
     },
+    SendSessionKeys {
+        pane_id: String,
+        keys: Vec<String>,
+        host: Option<String>,
+    },
 }
 
 pub struct App {
@@ -529,6 +534,19 @@ impl App {
         }
     }
 
+    pub fn scroll_preview_down(&mut self, amount: u16) {
+        let max = self.pane_preview_lines.len().saturating_sub(5) as u16;
+        self.pane_preview_scroll = (self.pane_preview_scroll + amount).min(max);
+        if self.pane_preview_scroll >= max {
+            self.pane_preview_pinned = true;
+        }
+    }
+
+    pub fn scroll_preview_up(&mut self, amount: u16) {
+        self.pane_preview_scroll = self.pane_preview_scroll.saturating_sub(amount);
+        self.pane_preview_pinned = false;
+    }
+
     fn handle_command_key(&mut self, key: KeyEvent) -> AppAction {
         match key.code {
             KeyCode::Esc => {
@@ -704,27 +722,20 @@ impl App {
                 AppAction::None
             }
             KeyCode::Char('J') => {
-                // Scroll preview down; re-pin if at bottom
-                let max = self.pane_preview_lines.len().saturating_sub(5) as u16;
-                self.pane_preview_scroll = (self.pane_preview_scroll + 5).min(max);
-                if self.pane_preview_scroll >= max {
-                    self.pane_preview_pinned = true;
-                }
+                self.scroll_preview_down(5);
                 AppAction::None
             }
             KeyCode::Char('K') => {
-                // Scroll preview up; unpin from bottom
-                self.pane_preview_scroll = self.pane_preview_scroll.saturating_sub(5);
-                self.pane_preview_pinned = false;
+                self.scroll_preview_up(5);
                 AppAction::None
             }
             KeyCode::Char('y') => {
-                // Quick-approve: send "y" + Enter to the selected session
+                // Quick-approve: send Enter to select the highlighted option
                 if let Some(session) = self.selected_session() {
                     if session.state == SessionState::NeedsInput {
-                        return AppAction::SendSessionReply {
+                        return AppAction::SendSessionKeys {
                             pane_id: session.pane_id.clone(),
-                            text: "y".to_string(),
+                            keys: vec!["Enter".to_string()],
                             host: session.host.clone(),
                         };
                     }
@@ -743,14 +754,20 @@ impl App {
                 }
                 AppAction::None
             }
-            KeyCode::Tab | KeyCode::Char('n') => self.next_needs_input(),
-            KeyCode::Enter | KeyCode::Char('a') => {
+            KeyCode::Char('n') => {
+                // Reject/cancel: send Escape to the selected session
                 if let Some(session) = self.selected_session() {
-                    AppAction::AttachSession(session.pane_id.clone())
-                } else {
-                    AppAction::None
+                    if session.state == SessionState::NeedsInput {
+                        return AppAction::SendSessionKeys {
+                            pane_id: session.pane_id.clone(),
+                            keys: vec!["Escape".to_string()],
+                            host: session.host.clone(),
+                        };
+                    }
                 }
+                AppAction::None
             }
+            KeyCode::Tab => self.next_needs_input(),
             KeyCode::Char('i') => {
                 self.show_untracked = !self.show_untracked;
                 self.selected_index = 0;
@@ -1803,33 +1820,11 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_key_enter_attaches_session() {
+    fn test_handle_key_enter_returns_none_in_sessions() {
         let mut app = App::new();
         app.update_sessions(vec![make_session("sess-1"), make_session("sess-2")]);
         app.select_next();
 
-        let action = app.handle_key(key(KeyCode::Enter));
-        match action {
-            AppAction::AttachSession(pane_id) => assert_eq!(pane_id, "%0"),
-            _ => panic!("expected AttachSession"),
-        }
-    }
-
-    #[test]
-    fn test_handle_key_a_attaches_session() {
-        let mut app = App::new();
-        app.update_sessions(vec![make_session("sess-1")]);
-
-        let action = app.handle_key(key(KeyCode::Char('a')));
-        match action {
-            AppAction::AttachSession(pane_id) => assert_eq!(pane_id, "%0"),
-            _ => panic!("expected AttachSession"),
-        }
-    }
-
-    #[test]
-    fn test_handle_key_enter_empty_returns_none() {
-        let mut app = App::new();
         let action = app.handle_key(key(KeyCode::Enter));
         assert!(matches!(action, AppAction::None));
     }
@@ -3125,20 +3120,29 @@ mod tests {
     }
 
     #[test]
-    fn test_n_key_same_as_tab() {
+    fn test_n_key_sends_escape_for_needs_input() {
         let mut app = App::new();
-        app.update_sessions(vec![
-            make_session_with_state("s1", SessionState::Working),
-            make_session_with_state("s2", SessionState::NeedsInput),
-            make_session_with_state("s3", SessionState::Done),
-        ]);
+        app.update_sessions(vec![make_session_with_state(
+            "s1",
+            SessionState::NeedsInput,
+        )]);
         app.selected_index = 0;
         let action = app.handle_key(key(KeyCode::Char('n')));
-        assert_eq!(app.selected_index, 1);
         match action {
-            AppAction::SelectSession(id) => assert_eq!(id, "s2"),
-            _ => panic!("expected SelectSession, got {:?}", action),
+            AppAction::SendSessionKeys { keys, .. } => {
+                assert_eq!(keys, vec!["Escape".to_string()]);
+            }
+            _ => panic!("expected SendSessionKeys, got {:?}", action),
         }
+    }
+
+    #[test]
+    fn test_n_key_noop_when_not_needs_input() {
+        let mut app = App::new();
+        app.update_sessions(vec![make_session_with_state("s1", SessionState::Working)]);
+        app.selected_index = 0;
+        let action = app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(action, AppAction::None));
     }
 
     #[test]

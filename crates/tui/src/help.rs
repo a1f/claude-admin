@@ -16,8 +16,13 @@ pub fn help_content(view_mode: ViewMode) -> Vec<(&'static str, &'static str, &'s
             entries.extend([
                 ("1-9", "Quick-switch to session", ""),
                 ("Tab", "Next needs-input session", ""),
-                ("y", "Approve (send Enter)", "tmux send-keys Enter"),
-                ("n", "Reject (send Escape)", "tmux send-keys Escape"),
+                ("Y", "Yes (option 1)", "tmux send-keys Enter"),
+                (
+                    "y",
+                    "Yes + always allow (option 2)",
+                    "tmux send-keys Down Enter",
+                ),
+                ("n", "No / cancel", "tmux send-keys Escape"),
                 ("t", "Type reply to session", "tmux send-keys"),
                 ("J / K", "Scroll pane preview", ""),
                 ("p", "Switch to Projects view", "ca project list"),

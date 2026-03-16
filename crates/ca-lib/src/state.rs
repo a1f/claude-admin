@@ -1,6 +1,6 @@
 use crate::models::SessionState;
 
-/// Priority: Done (last 3 lines) > NeedsInput (prompt at end) > Working > Idle
+/// Priority: Done > ActiveSpinner > NeedsInput > Working > Idle
 pub fn detect_state(content: &str) -> SessionState {
     let recent_lines: Vec<&str> = content.lines().rev().take(20).collect();
     let recent_content = recent_lines
@@ -20,6 +20,12 @@ pub fn detect_state(content: &str) -> SessionState {
 
     if is_done(&tail_content) {
         return SessionState::Done;
+    }
+
+    // Active Claude Code spinner (tokens counting up) always means Working,
+    // even if prompt-like patterns also appear in the output.
+    if is_active_spinner(&recent_content) {
+        return SessionState::Working;
     }
 
     if is_needs_input(&tail_content, content) {
@@ -57,6 +63,12 @@ fn is_working(content: &str) -> bool {
     working_patterns.iter().any(|p| content.contains(p))
 }
 
+/// Detects Claude Code's active spinner (e.g. "Shimmying... (3m 21s · ↑ 5.9k tokens · thought for 15s)").
+/// This is a high-confidence working indicator that takes priority over NeedsInput.
+fn is_active_spinner(content: &str) -> bool {
+    content.contains("tokens") && content.contains("thought for")
+}
+
 fn is_needs_input(recent_content: &str, full_content: &str) -> bool {
     let last_line = full_content
         .lines()
@@ -77,6 +89,7 @@ fn is_needs_input(recent_content: &str, full_content: &str) -> bool {
         "Press Enter",
         "Esc to cancel",
         "Do you want to proceed",
+        "accept edits on",
     ];
 
     if input_patterns.iter().any(|p| recent_content.contains(p)) {
@@ -264,6 +277,12 @@ mod tests {
     #[test]
     fn test_mid_tool_execution() {
         let content = "I'll search for that pattern.\n\n╭─ Grep ──────────────────────────────────────────────────╮\n│ Searching for \"SessionState\" in src/                    │\n│ ...";
+        assert_eq!(detect_state(content), SessionState::Working);
+    }
+
+    #[test]
+    fn test_claude_spinner_detected_as_working() {
+        let content = "Good exploration. I have a solid picture.\n\n◐ Shimmying... (3m 21s · ↑ 5.9k tokens · thought for 15s)\n  Tip: Use /btw to ask a quick side question\n\n>\nalf@host [git:main] [Opus 4.6] [ctx:41%]\n►► accept edits on (shift+tab to cycle)";
         assert_eq!(detect_state(content), SessionState::Working);
     }
 

@@ -189,9 +189,9 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = if app.show_untracked {
-        " Sessions [untracked] (y:approve n:reject t:reply i:all ?:help) "
+        " Sessions [untracked] (Y:yes y:always n:no t:reply ?:help) "
     } else {
-        " Sessions (y:approve n:reject t:reply p:projects ?:help) "
+        " Sessions (Y:yes y:always n:no t:reply p:projects ?:help) "
     };
 
     let list = List::new(items)
@@ -218,7 +218,7 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         "PAUSED"
     };
-    let scroll_hint = format!(" Pane [{pin_indicator}] (K:up J:down y:approve t:reply) ");
+    let scroll_hint = format!(" Pane [{pin_indicator}] (K:up J:down Y:yes y:always n:no t:reply) ");
 
     let block = Block::default().title(scroll_hint).borders(Borders::ALL);
     let inner_height = block.inner(area).height as usize;

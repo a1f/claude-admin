@@ -729,16 +729,25 @@ impl App {
                 self.scroll_preview_up(5);
                 AppAction::None
             }
-            KeyCode::Char('y') => {
-                // Quick-approve: send Enter to select the highlighted option
+            KeyCode::Char('Y') => {
+                // Yes (option 1): send Enter to select the highlighted option
                 if let Some(session) = self.selected_session() {
-                    if session.state == SessionState::NeedsInput {
-                        return AppAction::SendSessionKeys {
-                            pane_id: session.pane_id.clone(),
-                            keys: vec!["Enter".to_string()],
-                            host: session.host.clone(),
-                        };
-                    }
+                    return AppAction::SendSessionKeys {
+                        pane_id: session.pane_id.clone(),
+                        keys: vec!["Enter".to_string()],
+                        host: session.host.clone(),
+                    };
+                }
+                AppAction::None
+            }
+            KeyCode::Char('y') => {
+                // Yes + always allow (option 2): Down then Enter
+                if let Some(session) = self.selected_session() {
+                    return AppAction::SendSessionKeys {
+                        pane_id: session.pane_id.clone(),
+                        keys: vec!["Down".to_string(), "Enter".to_string()],
+                        host: session.host.clone(),
+                    };
                 }
                 AppAction::None
             }
@@ -757,13 +766,11 @@ impl App {
             KeyCode::Char('n') => {
                 // Reject/cancel: send Escape to the selected session
                 if let Some(session) = self.selected_session() {
-                    if session.state == SessionState::NeedsInput {
-                        return AppAction::SendSessionKeys {
-                            pane_id: session.pane_id.clone(),
-                            keys: vec!["Escape".to_string()],
-                            host: session.host.clone(),
-                        };
-                    }
+                    return AppAction::SendSessionKeys {
+                        pane_id: session.pane_id.clone(),
+                        keys: vec!["Escape".to_string()],
+                        host: session.host.clone(),
+                    };
                 }
                 AppAction::None
             }
@@ -802,11 +809,9 @@ impl App {
                 AppAction::LoadResources
             }
             KeyCode::Char('t') => {
-                if let Some(session) = self.selected_session() {
-                    if session.state == SessionState::NeedsInput {
-                        self.session_reply_input.clear();
-                        self.input_mode = InputMode::SessionReply;
-                    }
+                if self.selected_session().is_some() {
+                    self.session_reply_input.clear();
+                    self.input_mode = InputMode::SessionReply;
                 }
                 AppAction::None
             }
@@ -3137,12 +3142,17 @@ mod tests {
     }
 
     #[test]
-    fn test_n_key_noop_when_not_needs_input() {
+    fn test_n_key_sends_escape_even_when_not_needs_input() {
         let mut app = App::new();
         app.update_sessions(vec![make_session_with_state("s1", SessionState::Working)]);
         app.selected_index = 0;
         let action = app.handle_key(key(KeyCode::Char('n')));
-        assert!(matches!(action, AppAction::None));
+        match action {
+            AppAction::SendSessionKeys { keys, .. } => {
+                assert_eq!(keys, vec!["Escape".to_string()]);
+            }
+            _ => panic!("expected SendSessionKeys, got {:?}", action),
+        }
     }
 
     #[test]

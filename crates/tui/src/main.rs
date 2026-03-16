@@ -599,8 +599,18 @@ fn handle_action(action: AppAction, app: &mut App, db: Option<&Database>) {
                 for k in &keys {
                     cmd.arg(k);
                 }
-                let _ = cmd.status();
-                app.set_status("Keys sent");
+                let key_desc = keys.join(" ");
+                match cmd.status() {
+                    Ok(status) if status.success() => {
+                        app.set_status(format!("Sent [{key_desc}] → {pane_id}"));
+                    }
+                    Ok(status) => {
+                        app.set_status(format!("tmux error (exit {})", status));
+                    }
+                    Err(e) => {
+                        app.set_status(format!("tmux failed: {e}"));
+                    }
+                }
             }
         }
         // Handled in run_event_loop before reaching handle_action

@@ -151,14 +151,29 @@ pub fn get_pane_process(pane_id: &str) -> Result<String, TmuxError> {
 }
 
 pub fn capture_pane_content(pane_id: &str, lines: u32) -> Result<String, TmuxError> {
+    capture_pane_impl(pane_id, lines, false)
+}
+
+/// Like `capture_pane_content` but includes ANSI escape sequences for styling.
+pub fn capture_pane_styled(pane_id: &str, lines: u32) -> Result<String, TmuxError> {
+    capture_pane_impl(pane_id, lines, true)
+}
+
+fn capture_pane_impl(
+    pane_id: &str,
+    lines: u32,
+    escape_sequences: bool,
+) -> Result<String, TmuxError> {
     if lines == 0 {
         return Ok(String::new());
     }
 
     let start_line = format!("-{}", lines);
-    let output = Command::new("tmux")
-        .args(["capture-pane", "-p", "-t", pane_id, "-S", &start_line])
-        .output()?;
+    let mut args = vec!["capture-pane", "-p", "-t", pane_id, "-S", &start_line];
+    if escape_sequences {
+        args.push("-e");
+    }
+    let output = Command::new("tmux").args(&args).output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -241,8 +241,13 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     if app.pane_preview_lines.is_empty() {
         lines.push(Line::from("Loading pane content..."));
     } else {
+        use ansi_to_tui::IntoText;
         for raw_line in &app.pane_preview_lines {
-            lines.push(Line::from(raw_line.as_str()));
+            if let Ok(text) = raw_line.as_bytes().into_text() {
+                lines.extend(text.lines);
+            } else {
+                lines.push(Line::from(raw_line.as_str()));
+            }
         }
     }
 

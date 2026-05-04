@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>05 · roadmap — claude_admin v2</title>
+<link rel="stylesheet" href="theme.css" />
+<script src="_mermaid-init.js" defer></script>
+<style>
+.ms { display: grid; grid-template-columns: 100px 1fr; gap: 18px; align-items: start; padding: 16px 20px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; margin: 10px 0; }
+.ms .id { font-family: var(--mono); font-size: 22px; color: var(--accent); font-weight: 700; }
+.ms .id .sub { display:block; font-size: 10px; color: var(--text-faint); font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+.ms h3 { margin-top: 0; color: var(--text); font-family: var(--sans); font-size: 16px; }
+.ms .goal { color: var(--text-dim); font-style: italic; margin-bottom: 10px; font-size: 13px; }
+.ms ol { margin: 0; padding-left: 18px; font-size: 13px; }
+.ms ol li { padding: 2px 0; }
+.ms .meta { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 11.5px; color: var(--text-faint); font-family: var(--mono); }
+.ms .meta b { color: var(--text-dim); font-weight: 500; }
+.ms.foundation { border-left: 3px solid var(--accent); }
+.ms.observe    { border-left: 3px solid var(--info); }
+.ms.author     { border-left: 3px solid var(--accent-2); }
+.ms.dispatch   { border-left: 3px solid var(--coder); }
+.ms.review     { border-left: 3px solid var(--reviewer); }
+.ms.gate       { border-left: 3px solid var(--critic); }
+.ms.merge      { border-left: 3px solid var(--ok); }
+.ms.polish     { border-left: 3px solid var(--text-faint); }
+.ms.uimile     { background: linear-gradient(180deg, rgba(196,181,253,0.05), var(--bg-elev)); }
+.ms .ui-tag { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--accent-2); color: var(--accent-2); margin-left: 6px; vertical-align: middle; }
+
+.kind-row { display: grid; grid-template-columns: 100px 1fr; gap: 14px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; }
+.kind-row .badge { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; text-align: center; }
+.kind-row .badge.api { background: rgba(125,211,252,0.1); color: var(--accent); border: 1px solid var(--accent); }
+.kind-row .badge.ui  { background: rgba(196,181,253,0.1); color: var(--accent-2); border: 1px solid var(--accent-2); }
+.kind-row .badge.infra { background: rgba(125,211,252,0.05); color: var(--text-dim); border: 1px solid var(--border-strong); }
+.kind-row .badge.polish { background: var(--bg-elev-2); color: var(--text-faint); border: 1px solid var(--border-strong); }
+
+.changelog {
+  background: rgba(196,181,253,0.04);
+  border: 1px solid rgba(196,181,253,0.2);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin: 12px 0 24px;
+}
+.changelog h3 { margin-top: 0; color: var(--accent-2); font-family: var(--mono); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+.changelog ul { margin: 6px 0 0; padding-left: 20px; }
+.changelog li { padding: 2px 0; font-size: 13px; color: var(--text-dim); }
+.changelog li b { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">claude_admin / v2 / 05 · roadmap <span class="tag draft">draft v1</span></span>
+  <span class="crumb"><a href="index.html">← brief</a> · 01 <a href="01-system-overview.html">overview</a> · 02 <a href="02-workflow.html">workflow</a> · 03 <a href="03-data-model.html">data</a> · 04 <a href="04-agents.html">agents</a></span>
+</div>
+
+<main class="app">
+  <h1>Milestone roadmap <span class="tag draft">v1 — iterating</span></h1>
+  <p class="lede">
+    Twenty-two milestones. The big shift from v0: <b>API milestones and UI milestones are now separate</b>.
+    Each backend milestone ships an API testable end-to-end via curl + integration tests. UI milestones plug
+    into existing APIs. A dedicated UI polish milestone lives late, after dogfooding has surfaced the rough
+    edges. Foundation is split into server / daemon / docker-e2e. Sessions and Plans expanded.
+  </p>
+
+  <div class="changelog">
+    <h3>What changed since v0 (your feedback)</h3>
+    <ul>
+      <li><b>M0 split into 3</b>: M0a server skeleton · M0b daemon skeleton · M0c docker e2e infra (containers + integration tests).</li>
+      <li><b>M1 split into 3</b>: M1a sessions list API only · M1b sessions content + state · M1c dashboard UI.</li>
+      <li><b>Plans expanded</b>: M2a plans CRUD API · M2b plan comments API (Google-doc-style threaded comments anchored to sections / ranges) · M2c history/versioning API · M2d plans editor UI.</li>
+      <li><b>Breakdowns split</b>: M3a breakdown API + GH issue mirror · M3b breakdown UI.</li>
+      <li><b>Repo/GitHub manager added</b>: M4a server-side primitives for worktree + branch + PR ops via daemon, before dispatch builds on them. M4b dispatch API. M4c dispatch UI.</li>
+      <li><b>Review loop split</b>: M5 reviewers backend · M6a critics + architect backend · M6b PR review UI (the big screen).</li>
+      <li><b>Validation split</b>: M7a runners + artifacts API · M7b artifact gallery UI · M8 CI + final approval (UI is light, bundled).</li>
+      <li><b>UI polish promoted to its own milestone</b>: M10. Empty/loading/error states, keyboard shortcuts, density, a11y, perf — after we've dogfooded for a while.</li>
+      <li><b>Codex moved to M11</b> (was M10).</li>
+    </ul>
+  </div>
+
+  <h2>The API/UI separation pattern</h2>
+  <p class="lede">Every feature now goes through three kinds of milestones. Sequencing is generally <b>infra → API → UI</b>, with a polish pass at the end.</p>
+  <div class="kind-row"><span class="badge infra">infra</span><span><b>Foundation / plumbing.</b> Sets up environments and primitives nobody sees: server, daemon, docker compose, repo manager. Validated with integration tests.</span></div>
+  <div class="kind-row"><span class="badge api">api</span><span><b>API milestones.</b> Add features as REST endpoints + DB schema. Tested via curl, integration tests, e2e against containers. UI is irrelevant here. Each shippable on its own — you can use the API directly while we wait for the UI.</span></div>
+  <div class="kind-row"><span class="badge ui">ui</span><span><b>UI build milestones.</b> Plug into one or more existing APIs. The screen ships when the API is already proven. No backend work allowed in a UI milestone.</span></div>
+  <div class="kind-row"><span class="badge polish">polish</span><span><b>UI polish.</b> Single dedicated milestone late. Empty states, loading skeletons, error toasts, keyboard shortcuts, density, a11y, animations.</span></div>
+
+  <h2>Phase-grouped flow</h2>
+  <div class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph F[Foundation]
+    M0a[M0a · server] --> M0b[M0b · daemon]
+    M0b --> M0c[M0c · docker e2e]
+  end
+  subgraph S[Sessions]
+    M1a[M1a · list API] --> M1b[M1b · content+state API]
+    M1b --> M1c[M1c · dashboard UI]
+  end
+  subgraph P[Plans]
+    M2a[M2a · plans API] --> M2b[M2b · comments API]
+    M2a --> M2c[M2c · history API]
+    M2b --> M2d[M2d · plan editor UI]
+    M2c --> M2d
+  end
+  subgraph B[Breakdowns]
+    M3a[M3a · breakdown API + GH] --> M3b[M3b · breakdown UI]
+  end
+  subgraph R[Repo + dispatch]
+    M4a[M4a · repo / worktree / gh manager] --> M4b[M4b · dispatch API]
+    M4b --> M4c[M4c · dispatch UI]
+  end
+  subgraph V[Review loop]
+    M5[M5 · reviewers] --> M6a[M6a · critics + architect]
+    M6a --> M6b[M6b · PR review UI]
+  end
+  subgraph G[Validation + merge]
+    M7a[M7a · validation API] --> M7b[M7b · validation UI]
+    M7b --> M8[M8 · CI + final approval]
+  end
+  M9[M9 · self-improve + final critique]
+  M10[M10 · UI polish]
+  M11[M11 · codex + multi-laptop]
+
+  M0c --> M1a
+  M0c --> M2a
+  M2a --> M3a
+  M0c --> M4a
+  M3b --> M4b
+  M4c --> M5
+  M6b --> M7a
+  M8 --> M9
+  M9 --> M10
+  M10 --> M11
+    </div>
+    <div class="caption">Solid edges = hard dependency. Cross-phase fan-out shows where parallel work is possible (e.g. M2a and M4a can start once M0c lands).</div>
+  </div>
+
+  <h2>Milestones</h2>
+
+  <!-- ============== FOUNDATION ============== -->
+  <div class="ms foundation">
+    <div class="id">M0a<span class="sub">infra · foundation</span></div>
+    <div>
+      <h3>Server skeleton + auth + deploy</h3>
+      <div class="goal">Web server runs on a real VPS at https://your-server. GitHub OAuth login works. /healthz green. Reproducible deploy.</div>
+      <ol>
+        <li>Repo scaffold (chosen stack), formatter / linter / test runner / CI</li>
+        <li>HTTP server skeleton with /healthz</li>
+        <li>GitHub OAuth flow + session cookie + protected routes</li>
+        <li>Deploy pipeline: Caddy + systemd + Postgres + migration runner, single command</li>
+        <li>Smoke tests for OAuth + auth-required endpoint</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> low–med</span><span><b>Exit:</b> kill server, redeploy in &lt;5min, login still works</span></div>
+    </div>
+  </div>
+
+  <div class="ms foundation">
+    <div class="id">M0b<span class="sub">infra · foundation</span></div>
+    <div>
+      <h3>Daemon binary + WSS pairing</h3>
+      <div class="goal">Run <code>ca-daemon pair &lt;token&gt;</code> on your laptop, see "1 daemon online" in the browser. Survives kill -9 / wifi drop / reconnect.</div>
+      <ol>
+        <li>Daemon binary + persistent config in <code>~/.config/claude-admin/</code></li>
+        <li>Pairing protocol: token-based, server-issued, single-use</li>
+        <li>WSS reverse-tunnel + heartbeat + exponential backoff reconnect</li>
+        <li>Daemon registry on server: online/offline/last-seen, stub UI table</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> medium (network edge cases)</span><span><b>Exit:</b> daemon survives chaos test (random kill + restart loop)</span></div>
+    </div>
+  </div>
+
+  <div class="ms foundation">
+    <div class="id">M0c<span class="sub">infra · foundation</span></div>
+    <div>
+      <h3>Docker e2e infra</h3>
+      <div class="goal">CI spins up server-and-daemon-in-containers, runs integration tests covering pairing + heartbeat + WS RPC. Every PR runs them.</div>
+      <ol>
+        <li>Server Dockerfile (multi-stage, slim runtime)</li>
+        <li>Daemon Dockerfile (Linux, with tmux pre-installed for tests)</li>
+        <li>Docker compose harness for tests + ephemeral Postgres</li>
+        <li>First e2e suite: pair → heartbeat → daemon RPC echo round-trip</li>
+        <li>CI integration: matrix runs on PR, results posted as check</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> medium</span><span><b>Exit:</b> a green PR reliably means "deploy is safe"</span></div>
+    </div>
+  </div>
+
+  <!-- ============== SESSIONS ============== -->
+  <div class="ms observe">
+    <div class="id">M1a<span class="sub">api · observe</span></div>
+    <div>
+      <h3>Sessions discovery API (list-only)</h3>
+      <div class="goal">Daemon discovers Claude sessions in tmux. Server stores session rows. <code>GET /sessions</code> returns a list per project. No state inference, no pane content yet.</div>
+      <ol>
+        <li>Tmux discovery in daemon (port heuristic from current ca-lib)</li>
+        <li>Sessions schema + REST CRUD (create from daemon push, read from API)</li>
+        <li>Daemon → server push protocol for session create/destroy</li>
+        <li>Integration test: spawn fake tmux session in daemon container → assert it appears in API</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> low</span><span><b>Exit:</b> curl returns the list of running sessions</span></div>
+    </div>
+  </div>
+
+  <div class="ms observe">
+    <div class="id">M1b<span class="sub">api · observe</span></div>
+    <div>
+      <h3>Sessions content + state</h3>
+      <div class="goal">API exposes session state (idle/working/needs_input/done) + most recent ANSI pane snapshot. WS subscription pushes live updates. Snapshots TTL'd.</div>
+      <ol>
+        <li>State inference (idle / working / needs_input / done) from pane content + activity</li>
+        <li>Pane snapshot capture (debounced, ANSI-preserved) on daemon</li>
+        <li>Snapshot storage: append-only ring buffer + TTL</li>
+        <li>WS subscription endpoint for live session updates</li>
+        <li>e2e test: state changes propagate from daemon to subscribed WS client</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> low–med</span><span><b>Exit:</b> WS client sees state flip working→needs_input within 2s</span></div>
+    </div>
+  </div>
+
+  <div class="ms observe uimile">
+    <div class="id">M1c<span class="sub">ui · observe <span class="ui-tag">UI</span></span></div>
+    <div>
+      <h3>Sessions dashboard UI <span class="ui-tag">first real screen</span></h3>
+      <div class="goal">First user-facing screen. Lists projects + sessions with state badges + pane preview. Replaces the TUI in your daily flow.</div>
+      <ol>
+        <li>UI shell (sidebar + topbar + auth flow + project switcher)</li>
+        <li>Sessions list page with state badges + filter</li>
+        <li>Pane preview component (xterm.js or equivalent for ANSI)</li>
+        <li>Session detail page with full pane + event feed (events stub if not yet built)</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> low</span><span><b>Exit:</b> you stop opening tmux to check on Claude</span></div>
+    </div>
+  </div>
+
+  <!-- ============== PLANS ============== -->
+  <div class="ms author">
+    <div class="id">M2a<span class="sub">api · author</span></div>
+    <div>
+      <h3>Plans API (CRUD)</h3>
+      <div class="goal">Plan + Milestone schema + REST. No UI. Tested via curl + integration tests.</div>
+      <ol>
+        <li>Plan schema (body_md, goal, motivation, validation_strategy, status)</li>
+        <li>Milestone schema + plan→milestone relationship</li>
+        <li>REST CRUD for plans + milestones</li>
+        <li>e2e test: create plan, add 3 milestones, query, update, delete</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> low</span><span><b>Exit:</b> "create a plan from curl" works end-to-end</span></div>
+    </div>
+  </div>
+
+  <div class="ms author">
+    <div class="id">M2b<span class="sub">api · author</span></div>
+    <div>
+      <h3>Plan comments API <span class="ui-tag">Google-doc-style</span></h3>
+      <div class="goal">Threaded comments anchored to a plan section, milestone, or text range. Open / resolve / reply / @mention. No UI.</div>
+      <ol>
+        <li>Comment schema + anchor model (kind: section / milestone / range / breakdown_pr)</li>
+        <li>Threaded replies (parent_id) + status (open / resolved)</li>
+        <li>REST endpoints: create / list-by-anchor / reply / resolve</li>
+        <li>@mention parsing (deferred notifications until M10 polish)</li>
+        <li>e2e test: create comment on a range, reply, resolve, list-by-plan returns thread tree</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> medium (anchor model has to survive plan edits)</span><span><b>Exit:</b> resolved comments stay attached even when surrounding plan text moves</span></div>
+    </div>
+  </div>
+
+  <div class="ms author">
+    <div class="id">M2c<span class="sub">api · author</span></div>
+    <div>
+      <h3>Plan history / versioning API</h3>
+      <div class="goal">Every save creates a new immutable version row. Diff endpoint, revert endpoint. No UI.</div>
+      <ol>
+        <li>plan_versions table: full body snapshot per save</li>
+        <li>Diff endpoint: structured diff between any two versions</li>
+        <li>Revert endpoint: non-destructive (creates new version matching old)</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 3</span><span><b>Risk:</b> low</span><span><b>Exit:</b> revert v3 → v1 produces v4 identical to v1</span></div>
+    </div>
+  </div>
+
+  <div class="ms author uimile">
+    <div class="id">M2d<span class="sub">ui · author <span class="ui-tag">UI</span></span></div>
+    <div>
+      <h3>Plans editor UI</h3>
+      <div class="goal">Author plans in the browser, replacing your Notion flow. Plugs into M2a/b/c APIs.</div>
+      <ol>
+        <li>Editor + live preview (CodeMirror + remark)</li>
+        <li>Embedded mermaid renderer in preview</li>
+        <li>Image upload (drag-drop, paste) → object store</li>
+        <li>Milestone list inline with drag-reorder</li>
+        <li>Comments rail: threaded comments anchored to selection / sections</li>
+        <li>History view: version timeline + diff + revert button</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 6</span><span><b>Risk:</b> medium (comments anchoring UX is the hard part)</span><span><b>Exit:</b> next plan you write is in claude_admin, not Notion</span></div>
+    </div>
+  </div>
+
+  <!-- ============== BREAKDOWNS ============== -->
+  <div class="ms author">
+    <div class="id">M3a<span class="sub">api · author</span></div>
+    <div>
+      <h3>Breakdown API + GH issue mirror</h3>
+      <div class="goal">Per-milestone breakdown of PlannedPRs with parallelization. Mirrored bidirectionally to a GH issue.</div>
+      <ol>
+        <li>Breakdown + PlannedPR schema (spec_md, acceptance_criteria_md, depends_on, status)</li>
+        <li>REST CRUD for breakdowns + planned_prs</li>
+        <li>GH issue mirror: write breakdown body to GH issue, watch for issue updates</li>
+        <li>e2e test: create breakdown → GH issue exists with content; edit either side stays in sync</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> medium (sync edge cases)</span><span><b>Exit:</b> a breakdown round-trips through a GH issue without diverging</span></div>
+    </div>
+  </div>
+
+  <div class="ms author uimile">
+    <div class="id">M3b<span class="sub">ui · author <span class="ui-tag">UI</span></span></div>
+    <div>
+      <h3>Breakdown UI</h3>
+      <div class="goal">Visual editor for a milestone's PlannedPRs: DAG of dependencies, status kanban-ish list, link out to GH issue.</div>
+      <ol>
+        <li>Breakdown page shell + list of PlannedPRs</li>
+        <li>DAG / dependency editor (drag edges or "depends on" select)</li>
+        <li>Status view: filter by planned/coding/reviewing/merged</li>
+        <li>Embed in plan view as a sub-tab per milestone</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> medium (DAG editor UX)</span><span><b>Exit:</b> click a milestone → break it down in the UI → GH issue auto-populated</span></div>
+    </div>
+  </div>
+
+  <!-- ============== REPO + DISPATCH ============== -->
+  <div class="ms dispatch">
+    <div class="id">M4a<span class="sub">api · dispatch</span></div>
+    <div>
+      <h3>Repo + worktree + GitHub manager <span class="ui-tag">primitives</span></h3>
+      <div class="goal">Server-side primitives: list branches, create/remove worktree on a daemon, list PRs, open draft PR — all via daemon over WSS. No dispatch yet, just the building blocks.</div>
+      <ol>
+        <li>Worktree manager on daemon (git worktree add/remove + tracked state)</li>
+        <li>Branch ops API (list, create, delete) routed to daemon</li>
+        <li>PR ops via <code>gh</code> on daemon (create-draft, view, comment)</li>
+        <li>Server-side manager API that fans out to the right daemon</li>
+        <li>Integration tests in docker e2e: server creates worktree on daemon container, opens draft PR against fake GH</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> medium (gh + worktree lifecycle is fiddly)</span><span><b>Exit:</b> POST /worktree → branch + dir on disk; tear down cleanly</span></div>
+    </div>
+  </div>
+
+  <div class="ms dispatch">
+    <div class="id">M4b<span class="sub">api · dispatch</span></div>
+    <div>
+      <h3>Dispatch API + coder spawn</h3>
+      <div class="goal">Server picks a daemon for a PlannedPR, daemon creates worktree (M4a), spawns Claude in tmux with assembled prompt. PlannedPR transitions planned → dispatched → coding → drafted.</div>
+      <ol>
+        <li>Dispatch endpoint + daemon picker (label-based)</li>
+        <li>Prompt assembly: spec_md + plan_context + PR rules → markdown blob</li>
+        <li>Spawn cmd in daemon: tmux new-window + send prompt + start Claude</li>
+        <li>GH PR detection loop: when draft PR opens, link to PlannedPR + transition state</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> high (prompt quality determines coder output)</span><span><b>Exit:</b> POST /dispatch results in a draft PR with no terminal use</span></div>
+    </div>
+  </div>
+
+  <div class="ms dispatch uimile">
+    <div class="id">M4c<span class="sub">ui · dispatch <span class="ui-tag">UI</span></span></div>
+    <div>
+      <h3>Dispatch UI</h3>
+      <div class="goal">"Dispatch" button on breakdown rows; live linkage in dashboard ("Coder for M3.PR2 of project X"); dispatch history per PlannedPR.</div>
+      <ol>
+        <li>Dispatch button + confirm modal (which daemon? attempts so far?)</li>
+        <li>Dashboard linkage: session row shows the PlannedPR it's coding</li>
+        <li>Dispatch history view per PlannedPR (attempts, outcomes)</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 3</span><span><b>Risk:</b> low</span><span><b>Exit:</b> click → coder writes &amp; pushes a draft PR with no terminal use</span></div>
+    </div>
+  </div>
+
+  <!-- ============== REVIEW LOOP ============== -->
+  <div class="ms review">
+    <div class="id">M5<span class="sub">api · review</span></div>
+    <div>
+      <h3>Reviewers</h3>
+      <div class="goal">When a PlannedPR enters "drafted", auto-run reviewers via Claude API. Findings stored, exposed via API. No UI yet.</div>
+      <ol>
+        <li>Job queue (Postgres-backed)</li>
+        <li>Reviewer worker + Claude API client + structured output parsing</li>
+        <li>Prompt templates per kind: security / bugs / quality / custom</li>
+        <li>Findings storage + REST endpoints</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> high (prompt quality)</span><span><b>Exit:</b> on a real PR, at least 2 of 3 reviewer kinds produce useful findings</span></div>
+    </div>
+  </div>
+
+  <div class="ms gate">
+    <div class="id">M6a<span class="sub">api · gate</span></div>
+    <div>
+      <h3>Critics + architect decision</h3>
+      <div class="goal">Critics score 1–100 across axes. Architect aggregates reviewer + critic output → drop / iterate / accept with rationale. Iterate sends a feedback bundle to the coder. No UI yet.</div>
+      <ol>
+        <li>Critic worker + adversarial prompt templates per kind</li>
+        <li>Architect decision logic (rules + LLM rationale)</li>
+        <li>Feedback bundle generator (curated markdown)</li>
+        <li>Iterate flow: coder receives bundle, re-pushes, reviewers + critics re-run</li>
+        <li>Decision audit log + replayable inputs</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> high (this is the brain)</span><span><b>Exit:</b> for one real PR, the iterate loop works without your terminal intervention</span></div>
+    </div>
+  </div>
+
+  <div class="ms gate uimile">
+    <div class="id">M6b<span class="sub">ui · gate <span class="ui-tag">UI</span></span></div>
+    <div>
+      <h3>PR review UI <span class="ui-tag">the big screen</span></h3>
+      <div class="goal">The most-viewed page (mock 10). Reviewer findings, critic score card, validation gallery placeholder, architect verdict, decision UI.</div>
+      <ol>
+        <li>PR review page shell + tabs (overview / reviewers / critics / validation / diff / timeline)</li>
+        <li>Reviewer findings tab (grouped, filterable, severity badges)</li>
+        <li>Critic score card with axes breakdown</li>
+        <li>Decision UI: accept / iterate / drop with override + rationale display</li>
+        <li>Timeline tab: full event stream</li>
+        <li>Files / diff tab (link out for huge diffs)</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 6</span><span><b>Risk:</b> medium (UX-heavy)</span><span><b>Exit:</b> you read findings + decide in claude_admin instead of GH</span></div>
+    </div>
+  </div>
+
+  <!-- ============== VALIDATION + MERGE ============== -->
+  <div class="ms gate">
+    <div class="id">M7a<span class="sub">api · gate</span></div>
+    <div>
+      <h3>Validation gate (runners + artifacts API)</h3>
+      <div class="goal">Mandatory validators per project. Playwright + e2e scripts + migration dry-run produce Artifacts. Approval gate refuses approval until required validators have passed.</div>
+      <ol>
+        <li>ValidationRun + Artifact schema + runner abstraction</li>
+        <li>Playwright runner on daemon (daemon container has chromium for tests)</li>
+        <li>Artifact storage + signed URLs (local FS first)</li>
+        <li>E2E script runner (shell exec on daemon, capture stdout)</li>
+        <li>Approval gate enforcement at API level</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> medium (Playwright on real dev envs)</span><span><b>Exit:</b> a UI PR cannot reach approval without ≥1 screenshot</span></div>
+    </div>
+  </div>
+
+  <div class="ms gate uimile">
+    <div class="id">M7b<span class="sub">ui · gate <span class="ui-tag">UI</span></span></div>
+    <div>
+      <h3>Validation gallery UI</h3>
+      <div class="goal">PR review screen shows artifacts inline. Click-to-zoom, video playback, diff/log viewers. Validation status panel.</div>
+      <ol>
+        <li>Gallery component (thumbnails + click-to-zoom modal)</li>
+        <li>Viewer modals for video / log / trace</li>
+        <li>Validation status panel: which validators required, ran, passed/failed</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 3</span><span><b>Risk:</b> low</span><span><b>Exit:</b> screenshots open in-page, zoomable</span></div>
+    </div>
+  </div>
+
+  <div class="ms merge">
+    <div class="id">M8<span class="sub">api+light ui · merge</span></div>
+    <div>
+      <h3>CI watcher + final-approval flow</h3>
+      <div class="goal">Watch GH check_suite events. Fix-on-red loop. Architect drafts "ready to merge" explanation. User approves → claude_admin merges via gh. UI is light here — bundled.</div>
+      <ol>
+        <li>GH webhook receiver (with polling fallback)</li>
+        <li>Fix-on-red loop: parse failure logs, send to coder via feedback bundle</li>
+        <li>"Ready to merge" composer (architect drafts changes / risks / rollback)</li>
+        <li>User-approval UI in PR review screen</li>
+        <li>Merge automation: gh pr merge --squash; PlannedPR → merged</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> low–med</span><span><b>Exit:</b> first end-to-end merge with no terminal actions</span></div>
+    </div>
+  </div>
+
+  <!-- ============== SELF-IMPROVE ============== -->
+  <div class="ms merge">
+    <div class="id">M9<span class="sub">api+ui · merge</span></div>
+    <div>
+      <h3>Self-improvement + final milestone critique</h3>
+      <div class="goal">Per-merge retros. Per-milestone heavyweight critique reads merged code + tests + plan, verdict pass / gaps_found. Gaps become new PlannedPRs. Milestone shipped UI.</div>
+      <ol>
+        <li>Self-improvement worker: post-merge retro markdown</li>
+        <li>Retrospective view per project (apply / dismiss)</li>
+        <li>Final critique runner (Opus): post-last-merge, full milestone evaluation</li>
+        <li>Gap → PlannedPR loop: gaps create new PRs, milestone state in_flight again</li>
+        <li>Milestone shipped celebratory UI with timeline</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> medium (final critique prompt quality)</span><span><b>Exit:</b> first milestone shipped end-to-end through claude_admin</span></div>
+    </div>
+  </div>
+
+  <!-- ============== POLISH ============== -->
+  <div class="ms polish uimile">
+    <div class="id">M10<span class="sub">ui · polish <span class="ui-tag">UI POLISH</span></span></div>
+    <div>
+      <h3>UI polish pass <span class="ui-tag">after dogfooding</span></h3>
+      <div class="goal">After ~weeks of dogfooding through M9, dedicated milestone to fix the rough edges that real use surfaces. No new features.</div>
+      <ol>
+        <li>Empty / loading / error / offline state audit across every screen</li>
+        <li>Keyboard shortcuts pass (⌘K, gd/gp/gs, ⌘↵ to approve, etc.) + cheatsheet modal</li>
+        <li>Density toggle + theme polish (spacing, font sizing, color contrast)</li>
+        <li>Accessibility audit: tab order, ARIA labels, screen-reader pass on key flows</li>
+        <li>Performance pass: pane snapshot streaming, large plan rendering, virtualized lists</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 5</span><span><b>Risk:</b> low</span><span><b>Exit:</b> claude_admin feels like a shipped product, not an MVP</span></div>
+    </div>
+  </div>
+
+  <div class="ms polish">
+    <div class="id">M11<span class="sub">infra · polish</span></div>
+    <div>
+      <h3>Codex + multi-laptop</h3>
+      <div class="goal">Add Codex as a runtime alongside Claude. Pin projects to specific daemons. Multi-laptop dispatch.</div>
+      <ol>
+        <li>Codex session detection in daemon (process + pane heuristic)</li>
+        <li>Runtime field on Session + UI runtime badges</li>
+        <li>Daemon labels + project pinning ("this project always goes to lap-A")</li>
+        <li>Multi-daemon dispatcher: pick laptop based on labels + availability</li>
+      </ol>
+      <div class="meta"><span><b>PRs:</b> 4</span><span><b>Risk:</b> low</span><span><b>Exit:</b> Codex shows alongside Claude with no special handling</span></div>
+    </div>
+  </div>
+
+  <h2>Aggregate</h2>
+  <table>
+    <thead><tr><th>Milestone</th><th>Kind</th><th>Phase</th><th>PRs</th><th>Cumulative</th></tr></thead>
+    <tbody>
+      <tr><td>M0a</td><td>infra</td><td>foundation</td><td>5</td><td>5</td></tr>
+      <tr><td>M0b</td><td>infra</td><td>foundation</td><td>4</td><td>9</td></tr>
+      <tr><td>M0c</td><td>infra</td><td>foundation</td><td>5</td><td>14</td></tr>
+      <tr><td>M1a</td><td>api</td><td>observe</td><td>4</td><td>18</td></tr>
+      <tr><td>M1b</td><td>api</td><td>observe</td><td>5</td><td>23</td></tr>
+      <tr><td>M1c</td><td>ui</td><td>observe</td><td>4</td><td>27</td></tr>
+      <tr><td>M2a</td><td>api</td><td>author</td><td>4</td><td>31</td></tr>
+      <tr><td>M2b</td><td>api</td><td>author</td><td>5</td><td>36</td></tr>
+      <tr><td>M2c</td><td>api</td><td>author</td><td>3</td><td>39</td></tr>
+      <tr><td>M2d</td><td>ui</td><td>author</td><td>6</td><td>45</td></tr>
+      <tr><td>M3a</td><td>api</td><td>author</td><td>4</td><td>49</td></tr>
+      <tr><td>M3b</td><td>ui</td><td>author</td><td>4</td><td>53</td></tr>
+      <tr><td>M4a</td><td>api</td><td>dispatch</td><td>5</td><td>58</td></tr>
+      <tr><td>M4b</td><td>api</td><td>dispatch</td><td>4</td><td>62</td></tr>
+      <tr><td>M4c</td><td>ui</td><td>dispatch</td><td>3</td><td>65</td></tr>
+      <tr><td>M5</td><td>api</td><td>review</td><td>4</td><td>69</td></tr>
+      <tr><td>M6a</td><td>api</td><td>gate</td><td>5</td><td>74</td></tr>
+      <tr><td>M6b</td><td>ui</td><td>gate</td><td>6</td><td>80</td></tr>
+      <tr><td>M7a</td><td>api</td><td>gate</td><td>5</td><td>85</td></tr>
+      <tr><td>M7b</td><td>ui</td><td>gate</td><td>3</td><td>88</td></tr>
+      <tr><td>M8</td><td>api+ui</td><td>merge</td><td>5</td><td>93</td></tr>
+      <tr><td>M9</td><td>api+ui</td><td>merge</td><td>5</td><td>98</td></tr>
+      <tr><td>M10</td><td>ui polish</td><td>polish</td><td>5</td><td>103</td></tr>
+      <tr><td>M11</td><td>infra</td><td>polish</td><td>4</td><td>107</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top: 8px;">22 milestones · ~107 PRs · ~150 LOC each = ~16k LOC budget. Each milestone is small enough to ship in days, big enough that "done" is meaningful.</p>
+
+  <h2>Risk register</h2>
+  <table>
+    <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Reviewer/critic prompts produce useless output</td><td>High</td><td>Critical</td><td>M5 + M6a have explicit "tune until trusted on 3 real PRs" exit gates.</td></tr>
+      <tr><td>UI work blocked because API isn't done</td><td>Medium</td><td>Medium</td><td>API milestones ship behind a feature flag; UI milestones can start dev against fixtures.</td></tr>
+      <tr><td>Comments anchor model breaks on plan edits</td><td>Medium</td><td>Medium</td><td>M2b includes anchor-stability tests; consider character-offset + neighborhood hashing.</td></tr>
+      <tr><td>GH issue mirror diverges on conflicting edits</td><td>Medium</td><td>Medium</td><td>M3a establishes claude_admin as source of truth; GH is one-way after initial sync, with diff alerting if drift detected.</td></tr>
+      <tr><td>Daemon disconnect under heavy traffic</td><td>Medium</td><td>Medium</td><td>M0b includes proper backoff + offline event queue.</td></tr>
+      <tr><td>Playwright fragile on dev envs</td><td>Medium</td><td>Medium</td><td>M7a starts with claude_admin itself; generalize once stable.</td></tr>
+      <tr><td>Cost runaway on Claude API</td><td>Medium</td><td>High</td><td>Per-role token budgets in M5/M6a; daily cost cap; UI dashboard tile.</td></tr>
+      <tr><td>UI feels rough until M10</td><td>High</td><td>Low</td><td>Acceptable trade-off — we'd rather ship working flows ugly than polished flows broken.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>What this roadmap deliberately doesn't include</h2>
+  <ul>
+    <li>Multi-user / teams</li>
+    <li>Mobile UI · iOS app</li>
+    <li>Plugin/skill marketplace</li>
+    <li>Live multi-tab plan editing (last-write-wins for v1)</li>
+    <li>Notion sync (mocks assume claude_admin replaces Notion)</li>
+    <li>Customizable dashboards / saved views</li>
+    <li>Cost forecasting (we track actuals only)</li>
+  </ul>
+
+  <h2>Open knobs to turn together</h2>
+  <div class="callout q">
+    <ul>
+      <li>Is M2 (3 API milestones + 1 UI) the right shape? Could collapse M2c history into M2a if you'd rather get the editor sooner.</li>
+      <li>Should M6b PR review UI come before M6a critics? You'd see findings + your own brain decides until critics catch up. Useful early dogfooding.</li>
+      <li>M4a (repo manager) — should this come earlier (after M0c) so it's available for everything that needs git ops, or stay where it is (right before dispatch)?</li>
+      <li>UI polish at M10 vs splitting it into 2–3 smaller polish milestones interleaved (e.g., one after M1c, one after M2d, one at M10)?</li>
+      <li>Is "M8 has light bundled UI" cheating the API/UI split? Could make it M8a + M8b. Tradeoff: M8 UI is genuinely tiny (one approval modal).</li>
+      <li>Plan comments (M2b) — anchor only to plan body, or also to milestones / breakdown PRs / sessions / decisions? More anchor types = more value but bigger scope.</li>
+    </ul>
+  </div>
+
+  <p style="margin-top:48px"><a href="04-agents.html">← 04 · agents</a> · UI mocks: <a href="06-ui-shell.html">06 · shell →</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,493 @@
+{
+  "$schema_version": 1,
+  "plan_codename": "v2_design",
+  "plan_title": "Rewrite claude_admin to a web admin orchestrator",
+  "gh_repo": "a1f/claude-admin",
+  "default_base": "main",
+  "milestones": [
+    {
+      "id": "M0a",
+      "title": "Server skeleton + auth + deploy",
+      "phase": "foundation",
+      "kind": "infra",
+      "goal": "Web server live on a real VPS at https://your-server. GitHub OAuth login works. /healthz green. Reproducible deploy. Quota circuit breaker scaffolding stubbed in.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Repo scaffold (Rust workspace, axum + sqlx + tracing), formatter / lint / test CI",
+        "HTTP server skeleton with /healthz + structured logging",
+        "GitHub OAuth flow + signed session cookie + protected routes",
+        "Deploy: Caddy + systemd + Postgres + sqlx-migrate, single command",
+        "Quota tracker stub: schema + endpoints (real values come in M6)"
+      ],
+      "exit_criteria": "kill server, redeploy in <5min, login still works",
+      "risk": "low-medium",
+      "depends_on": [],
+      "status": "broken_down",
+      "breakdown": {
+        "issue_url": "https://github.com/a1f/claude-admin/issues/1",
+        "local_file": "/Users/alf/dev/claude_admin/v2_design/breakdowns/M0a.md",
+        "task_count": 5,
+        "total_loc_estimate": 730,
+        "task_ids": ["M0a-T1", "M0a-T2", "M0a-T3", "M0a-T4", "M0a-T5"],
+        "created_at": "2026-04-28"
+      }
+    },
+    {
+      "id": "M0b",
+      "title": "Daemon binary + WSS pairing",
+      "phase": "foundation",
+      "kind": "infra",
+      "goal": "Run `ca-daemon pair <token>` on your laptop, see '1 daemon online' in browser. Survives kill -9 / wifi drop / reconnect.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Daemon binary (Rust), config in ~/.config/claude-admin/",
+        "Pairing protocol: token-based, server-issued, single-use",
+        "WSS reverse-tunnel + heartbeat + exponential backoff reconnect",
+        "Daemon registry on server: online/offline/last-seen, stub UI table"
+      ],
+      "exit_criteria": "daemon survives chaos test (random kill + restart loop)",
+      "risk": "medium",
+      "depends_on": ["M0a"],
+      "status": "planned"
+    },
+    {
+      "id": "M0c",
+      "title": "Docker e2e infra",
+      "phase": "foundation",
+      "kind": "infra",
+      "goal": "CI spins up server-and-daemon-in-containers, runs integration tests covering pairing + heartbeat + WS RPC. Every PR runs them.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Server Dockerfile (multi-stage, slim runtime)",
+        "Daemon Dockerfile (Linux, with tmux + claude-CLI mock for tests)",
+        "Docker compose harness + ephemeral Postgres",
+        "First e2e suite: pair → heartbeat → daemon RPC echo round-trip",
+        "CI integration: matrix on every PR, results posted as check"
+      ],
+      "exit_criteria": "a green PR reliably means 'deploy is safe'",
+      "risk": "medium",
+      "depends_on": ["M0b"],
+      "status": "planned"
+    },
+    {
+      "id": "M1",
+      "title": "Repo + worktree + GitHub manager",
+      "phase": "repo",
+      "kind": "api",
+      "goal": "Server-side primitives via daemon: list branches, create/remove worktrees, list PRs, open draft PRs. Building blocks for everything that touches git.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Worktree manager on daemon (git worktree add/remove + tracked state)",
+        "Branch ops API (list/create/delete) routed to daemon",
+        "PR ops via gh on daemon (create-draft, view, comment)",
+        "Server-side manager API that fans out to the right daemon",
+        "Integration tests: server creates worktree on daemon container, opens draft PR"
+      ],
+      "exit_criteria": "POST /worktree → branch + dir on disk; tear down cleanly",
+      "risk": "medium",
+      "depends_on": ["M0c"],
+      "status": "planned"
+    },
+    {
+      "id": "M2a",
+      "title": "Sessions discovery API (list-only)",
+      "phase": "observe",
+      "kind": "api",
+      "goal": "Daemon discovers Claude sessions in tmux. Server stores. GET /sessions returns a list per project. No state, no content yet.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Tmux discovery in daemon (port heuristic from current ca-lib)",
+        "Sessions schema + REST CRUD",
+        "Daemon → server push for create/destroy events",
+        "Integration test: spawn fake tmux session in daemon container → API returns it"
+      ],
+      "exit_criteria": "curl returns the list of running sessions",
+      "risk": "low",
+      "depends_on": ["M0c"],
+      "status": "planned"
+    },
+    {
+      "id": "M2b",
+      "title": "Sessions content + state",
+      "phase": "observe",
+      "kind": "api",
+      "goal": "API exposes session state (idle/working/needs_input/done) + most recent ANSI pane snapshot. WS subscriptions push live updates. Snapshots TTL'd.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "State inference (idle / working / needs_input / done)",
+        "Pane snapshot capture (debounced, ANSI-preserved) on daemon",
+        "Snapshot storage: append-only ring buffer + TTL",
+        "WS subscription endpoint for live session updates",
+        "e2e test: state changes propagate from daemon to subscribed WS client"
+      ],
+      "exit_criteria": "WS client sees state flip working→needs_input within 2s",
+      "risk": "low-medium",
+      "depends_on": ["M2a"],
+      "status": "planned"
+    },
+    {
+      "id": "M2c",
+      "title": "Sessions dashboard UI",
+      "phase": "observe",
+      "kind": "ui",
+      "goal": "First user-facing screen. Lists projects + sessions with state badges + pane preview. Replaces the TUI.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "UI shell (sidebar + topbar + auth flow + project switcher)",
+        "Sessions list page with state badges + filter",
+        "Pane preview component (xterm.js, ANSI rendering)",
+        "Session detail page with full pane + event feed (events stub)"
+      ],
+      "exit_criteria": "you stop opening tmux to check on Claude",
+      "risk": "low",
+      "depends_on": ["M2b"],
+      "status": "planned"
+    },
+    {
+      "id": "M2d",
+      "title": "UI polish #1 — sessions/dashboard",
+      "phase": "polish",
+      "kind": "ui",
+      "goal": "Tighten the screens we just shipped before piling more on top. Empty/loading/error states; sessions keyboard shortcuts; density toggle prototype.",
+      "pr_count_target": 3,
+      "raw_prs": [
+        "Empty / loading / error / offline states for dashboard + sessions",
+        "Keyboard shortcuts for sessions (open, pause, jump-to-bottom, take snapshot)",
+        "Density toggle (Comfortable / Compact) wired into the shell"
+      ],
+      "exit_criteria": "dashboard handles a flaky network without ugly states",
+      "risk": "low",
+      "depends_on": ["M2c"],
+      "status": "planned"
+    },
+    {
+      "id": "M3a",
+      "title": "Plans API (CRUD)",
+      "phase": "author",
+      "kind": "api",
+      "goal": "Plan + Milestone schema + REST. No UI; tested via curl + integration tests.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Plan schema (body_md, goal, motivation, validation_strategy, status)",
+        "Milestone schema + plan→milestone relationship",
+        "REST CRUD for plans + milestones",
+        "e2e test: create plan, add 3 milestones, query, update, delete"
+      ],
+      "exit_criteria": "'create a plan from curl' works end-to-end",
+      "risk": "low",
+      "depends_on": ["M0c"],
+      "status": "planned"
+    },
+    {
+      "id": "M3b",
+      "title": "Plan comments API (Google-doc-style)",
+      "phase": "author",
+      "kind": "api",
+      "goal": "Threaded comments anchored to plan section / milestone / text range / breakdown PR / decision. Open / resolve / reply / @mention. No UI.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Comment schema + anchor model (kind + anchor_id + range_start/end + range_quote)",
+        "Threaded replies (parent_id) + status (open / resolved / deleted)",
+        "REST endpoints: create / list-by-anchor / reply / resolve",
+        "@mention parsing (notifications deferred to M12 polish)",
+        "e2e test: comment on a range, reply, resolve; thread tree returned correctly"
+      ],
+      "exit_criteria": "resolved comments stay attached when surrounding plan text shifts",
+      "risk": "medium",
+      "depends_on": ["M3a"],
+      "status": "planned"
+    },
+    {
+      "id": "M3c",
+      "title": "Plan history / versioning API",
+      "phase": "author",
+      "kind": "api",
+      "goal": "Every save = new immutable version row. Diff endpoint, revert endpoint.",
+      "pr_count_target": 3,
+      "raw_prs": [
+        "plan_versions table: full body snapshot per save",
+        "Diff endpoint: structured diff between any two versions",
+        "Revert endpoint: non-destructive (creates new version matching old)"
+      ],
+      "exit_criteria": "revert v3 → v1 produces v4 identical to v1",
+      "risk": "low",
+      "depends_on": ["M3a"],
+      "status": "planned"
+    },
+    {
+      "id": "M3d",
+      "title": "Plans editor UI",
+      "phase": "author",
+      "kind": "ui",
+      "goal": "Author plans in the browser. Plugs into M3a/b/c. Replaces Notion.",
+      "pr_count_target": 6,
+      "raw_prs": [
+        "Editor + live preview (CodeMirror + remark)",
+        "Embedded mermaid renderer",
+        "Image upload (drag-drop + paste) → object store",
+        "Milestone list inline with drag-reorder",
+        "Comments rail: threaded comments anchored to selection / sections",
+        "History view: version timeline + diff + revert button"
+      ],
+      "exit_criteria": "next plan you write is in claude_admin, not Notion",
+      "risk": "medium",
+      "depends_on": ["M3b", "M3c"],
+      "status": "planned"
+    },
+    {
+      "id": "M3e",
+      "title": "UI polish #2 — plan editor + comments",
+      "phase": "polish",
+      "kind": "ui",
+      "goal": "Tighten plan editor UX before it becomes the daily writing tool.",
+      "pr_count_target": 3,
+      "raw_prs": [
+        "Empty / loading / error states for plan editor + comments rail",
+        "Keyboard shortcuts: ⌘S save, ⌘. comment on selection, ⌘↵ resolve thread",
+        "Comments rail polish: collapsed/expanded states, resolution celebration, @mention autocomplete"
+      ],
+      "exit_criteria": "writing a plan feels as good as Notion",
+      "risk": "low",
+      "depends_on": ["M3d"],
+      "status": "planned"
+    },
+    {
+      "id": "M4a",
+      "title": "Breakdown API + GH issue mirror",
+      "phase": "author",
+      "kind": "api",
+      "goal": "Per-milestone Breakdown of PlannedPRs with parallelization. Mirrored bidirectionally to a GH issue.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Breakdown + PlannedPR schema (spec_md, acceptance_criteria_md, depends_on, status)",
+        "REST CRUD for breakdowns + planned_prs",
+        "GH issue mirror: write breakdown body, watch for issue updates",
+        "e2e: breakdown round-trips through a GH issue without diverging"
+      ],
+      "exit_criteria": "a breakdown round-trips through a GH issue",
+      "risk": "medium",
+      "depends_on": ["M3a"],
+      "status": "planned"
+    },
+    {
+      "id": "M4b",
+      "title": "Breakdown UI",
+      "phase": "author",
+      "kind": "ui",
+      "goal": "Visual editor for a milestone's PlannedPRs: DAG of dependencies, status kanban-ish list, link out to GH issue.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Breakdown page shell + list of PlannedPRs",
+        "DAG / dependency editor",
+        "Status filter view",
+        "Embed in plan view as sub-tab per milestone"
+      ],
+      "exit_criteria": "milestone broken down in UI; GH issue auto-populated",
+      "risk": "medium",
+      "depends_on": ["M4a"],
+      "status": "planned"
+    },
+    {
+      "id": "M5a",
+      "title": "Dispatch API + coder spawn",
+      "phase": "dispatch",
+      "kind": "api",
+      "goal": "Server picks daemon → daemon creates worktree (M1) → spawns coder via tmux+CLI. PlannedPR transitions planned → dispatched → coding → drafted.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Dispatch endpoint + daemon picker (label-based)",
+        "Prompt assembly: spec_md + plan_context + PR rules → markdown blob",
+        "Spawn cmd in daemon: tmux new-window + send prompt + start claude",
+        "GH PR detection loop: when draft PR opens, link to PlannedPR + transition state"
+      ],
+      "exit_criteria": "POST /dispatch results in a draft PR with no terminal use",
+      "risk": "high",
+      "depends_on": ["M1", "M4a"],
+      "status": "planned"
+    },
+    {
+      "id": "M5b",
+      "title": "Dispatch UI",
+      "phase": "dispatch",
+      "kind": "ui",
+      "goal": "'Dispatch' button on breakdown rows; live linkage in dashboard ('Coder for M3.PR2 of project X'); dispatch history per PlannedPR.",
+      "pr_count_target": 3,
+      "raw_prs": [
+        "Dispatch button + confirm modal (which daemon? attempts so far?)",
+        "Dashboard linkage: session row shows the PlannedPR it's coding",
+        "Dispatch history view per PlannedPR (attempts, outcomes)"
+      ],
+      "exit_criteria": "click → coder writes & pushes a draft PR with no terminal use",
+      "risk": "low",
+      "depends_on": ["M5a"],
+      "status": "planned"
+    },
+    {
+      "id": "M6",
+      "title": "Reviewers",
+      "phase": "review",
+      "kind": "api",
+      "goal": "When a PlannedPR enters 'drafted', auto-run reviewers via claude -p subprocess. Findings stored, exposed via API. No critic / architect logic yet.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Job queue (Postgres-backed)",
+        "Reviewer worker + claude -p wrapper + structured-JSON output parsing",
+        "Prompt templates per kind: security / bugs / quality / custom",
+        "Findings storage + REST endpoints; quota usage tracked per call"
+      ],
+      "exit_criteria": "on a real PR, ≥2 of 3 reviewer kinds produce useful findings",
+      "risk": "high",
+      "depends_on": ["M5b"],
+      "status": "planned"
+    },
+    {
+      "id": "M7",
+      "title": "PR review UI",
+      "phase": "gate",
+      "kind": "ui",
+      "goal": "The big screen (mock 10). Reviewer findings, validation gallery placeholder, manual decision buttons. You read findings + click ✓ / iterate / drop. Critics + auto-architect come in M8 and backfill the same UI.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "PR review page shell + tabs (overview / reviewers / validation / diff / timeline)",
+        "Reviewer findings tab (grouped, filterable, severity badges)",
+        "Manual decision UI: accept / iterate / drop; iterate sends feedback bundle composed by you",
+        "Timeline tab: full event stream",
+        "Files / diff tab (link out for huge diffs)"
+      ],
+      "exit_criteria": "you read findings + decide in claude_admin instead of GH",
+      "risk": "medium",
+      "depends_on": ["M6"],
+      "status": "planned"
+    },
+    {
+      "id": "M8",
+      "title": "Critics + architect decision",
+      "phase": "gate",
+      "kind": "api",
+      "goal": "Critics score 1–100 across axes. Architect aggregates reviewer + critic output → drop / iterate / accept with rationale. Iterate sends feedback bundle to coder. UI from M7 gets verdict panel auto-filled.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Critic worker + adversarial prompt templates per kind",
+        "Architect decision logic (rules + thresholds + LLM rationale via claude -p)",
+        "Feedback bundle generator (curated markdown)",
+        "Iterate flow: coder receives bundle, re-pushes, reviewers + critics re-run",
+        "Decision audit log + replayable inputs"
+      ],
+      "exit_criteria": "for one real PR, the iterate loop works without your terminal intervention",
+      "risk": "high",
+      "depends_on": ["M7"],
+      "status": "planned"
+    },
+    {
+      "id": "M9a",
+      "title": "Validation gate (runners + artifacts API)",
+      "phase": "gate",
+      "kind": "api",
+      "goal": "Mandatory validators per project. Playwright + e2e scripts + migration dry-runs produce Artifacts. Approval gate refuses approval until required validators have passed.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "ValidationRun + Artifact schema + runner abstraction",
+        "Playwright runner on daemon (daemon container has chromium)",
+        "Artifact storage + signed URLs (local FS first)",
+        "E2E script runner (shell exec on daemon, capture stdout)",
+        "Approval gate enforcement at API level"
+      ],
+      "exit_criteria": "a UI PR cannot reach approval without ≥1 screenshot",
+      "risk": "medium",
+      "depends_on": ["M8"],
+      "status": "planned"
+    },
+    {
+      "id": "M9b",
+      "title": "Validation gallery UI",
+      "phase": "gate",
+      "kind": "ui",
+      "goal": "PR review screen shows artifacts inline. Click-to-zoom, video playback, log viewers. Validation status panel.",
+      "pr_count_target": 3,
+      "raw_prs": [
+        "Gallery component (thumbnails + click-to-zoom modal)",
+        "Viewer modals for video / log / trace",
+        "Validation status panel: which validators required, ran, passed/failed"
+      ],
+      "exit_criteria": "screenshots open in-page, zoomable",
+      "risk": "low",
+      "depends_on": ["M9a"],
+      "status": "planned"
+    },
+    {
+      "id": "M10",
+      "title": "CI watcher + final-approval flow",
+      "phase": "merge",
+      "kind": "api+light_ui",
+      "goal": "Watch GH check_suite events. Fix-on-red loop. Architect drafts 'ready to merge' explanation. User clicks ✓ → claude_admin merges via gh.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "GH webhook receiver (with polling fallback)",
+        "Fix-on-red loop: parse failure logs, send to coder via feedback bundle",
+        "'Ready to merge' composer (architect drafts changes / risks / rollback)",
+        "User-approval UI in PR review screen",
+        "Merge automation: gh pr merge --squash; PlannedPR → merged"
+      ],
+      "exit_criteria": "first end-to-end merge with no terminal actions",
+      "risk": "low-medium",
+      "depends_on": ["M9b"],
+      "status": "planned"
+    },
+    {
+      "id": "M11",
+      "title": "Self-improvement + final milestone critique",
+      "phase": "merge",
+      "kind": "api+ui",
+      "goal": "Per-merge retros. Per-milestone heavyweight critique reads merged code + tests + plan, verdict pass / gaps_found. Gaps become new PlannedPRs. Milestone shipped UI.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Self-improvement worker: post-merge retro markdown via claude -p",
+        "Retrospective view per project (apply / dismiss)",
+        "Final critique runner: post-last-merge, full milestone evaluation",
+        "Gap → PlannedPR loop: gaps create new PRs, milestone state in_flight again",
+        "Milestone shipped celebratory UI with timeline"
+      ],
+      "exit_criteria": "first milestone shipped end-to-end through claude_admin",
+      "risk": "medium",
+      "depends_on": ["M10"],
+      "status": "planned"
+    },
+    {
+      "id": "M12",
+      "title": "UI polish #3 — final pass",
+      "phase": "polish",
+      "kind": "ui",
+      "goal": "After dogfooding M0a–M11, dedicated final pass. Fixes the rough edges real use surfaced.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Full a11y audit + fixes (tab order, ARIA, screen reader on key flows)",
+        "Performance pass: pane snapshot streaming, large plan rendering, virtualized lists",
+        "Animation polish: state transitions, toasts, modal entry/exit",
+        "Cross-browser sanity (Safari + Firefox parity)",
+        "Notifications: in-app inbox for needs-input alerts + @mentions"
+      ],
+      "exit_criteria": "claude_admin feels like a shipped product, not an MVP",
+      "risk": "low",
+      "depends_on": ["M11"],
+      "status": "planned"
+    },
+    {
+      "id": "M13",
+      "title": "Codex + multi-laptop",
+      "phase": "codex",
+      "kind": "infra",
+      "goal": "Add Codex as a runtime alongside Claude. Pin projects to specific daemons. Multi-laptop dispatch.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Codex session detection in daemon",
+        "Runtime field on Session + UI runtime badges",
+        "Daemon labels + project pinning",
+        "Multi-daemon dispatcher: pick laptop based on labels + availability"
+      ],
+      "exit_criteria": "Codex shows alongside Claude with no special handling",
+      "risk": "low",
+      "depends_on": ["M12"],
+      "status": "planned"
+    }
+  ]
+}

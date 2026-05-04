@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>10 · PR review — claude_admin v2</title>
+<link rel="stylesheet" href="theme.css" />
+<link rel="stylesheet" href="ui-shell.css" />
+<style>
+.pr-head {
+  display: grid; grid-template-columns: 1fr 320px; gap: 20px;
+  padding: 16px 18px; background: var(--bg-elev);
+  border: 1px solid var(--border); border-radius: 10px; margin-bottom: 18px;
+}
+.pr-head .title { font-size: 19px; font-weight: 600; }
+.pr-head .sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--mono); }
+.pr-head .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; font-size: 12px; }
+.pr-head .meta-grid .k { color: var(--text-faint); }
+.pr-head .meta-grid .v { color: var(--text); font-family: var(--mono); }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+.tabs a { padding: 8px 14px; font-size: 13px; color: var(--text-dim); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a:hover { color: var(--text); text-decoration: none; }
+.tabs a.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tabs a .badge {
+  display: inline-block; margin-left: 4px;
+  font-size: 10px; padding: 1px 6px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); color: var(--text-dim);
+}
+
+.score-card {
+  background: linear-gradient(180deg, rgba(244,114,182,0.08), transparent);
+  border: 1px solid var(--critic);
+  border-radius: 10px; padding: 16px 18px; margin-bottom: 14px;
+}
+.score-card .num { font-family: var(--mono); font-weight: 700; font-size: 38px; color: var(--critic); line-height: 1; }
+.score-card .of { color: var(--text-faint); font-family: var(--mono); }
+.score-card .axes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 10px; font-size: 12px; }
+.score-card .axes .k { color: var(--text-dim); }
+.score-card .axes .v { color: var(--critic); font-family: var(--mono); text-align: right; }
+.score-card .verdict { font-family: var(--mono); font-size: 12px; margin-top: 8px; }
+
+.finding {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; margin: 8px 0; background: var(--bg-elev);
+  font-size: 13px;
+}
+.finding .head { display: flex; gap: 8px; align-items: baseline; }
+.finding .sev { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radius: 999px; }
+.finding .sev.blocker { background: rgba(248,113,113,0.12); color: var(--err); border: 1px solid var(--err); }
+.finding .sev.major { background: rgba(251,191,36,0.12); color: var(--warn); border: 1px solid var(--warn); }
+.finding .sev.minor { background: rgba(96,165,250,0.12); color: var(--info); border: 1px solid var(--info); }
+.finding .sev.nit { background: var(--bg-elev-2); color: var(--text-faint); border: 1px solid var(--border); }
+.finding .file { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+.finding .desc { margin-top: 4px; color: var(--text); }
+.finding .fix { margin-top: 4px; color: var(--text-dim); font-style: italic; }
+
+.decision-bar {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px; padding: 14px; margin: 14px 0;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.decision-bar button {
+  padding: 14px 16px; border-radius: 8px; cursor: pointer;
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.decision-bar button:hover { border-color: var(--accent); }
+.decision-bar button .lbl-big { font-size: 16px; }
+.decision-bar button .lbl-sub { font-size: 11px; color: var(--text-faint); font-weight: 400; }
+.decision-bar .accept { border-color: var(--ok); }
+.decision-bar .accept .lbl-big { color: var(--ok); }
+.decision-bar .iterate { border-color: var(--warn); }
+.decision-bar .iterate .lbl-big { color: var(--warn); }
+.decision-bar .drop { border-color: var(--err); }
+.decision-bar .drop .lbl-big { color: var(--err); }
+.decision-bar button.recommended { box-shadow: 0 0 0 2px var(--ok), 0 0 16px rgba(74,222,128,0.3); }
+
+.artifact {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg-elev);
+}
+.artifact .thumb {
+  background: linear-gradient(135deg, #1e3a5f 0%, #4c1d95 50%, #1e293b 100%);
+  height: 110px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 11px; color: rgba(255,255,255,0.8);
+}
+.artifact .label { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+
+.timeline-row { display: grid; grid-template-columns: 90px 16px 1fr; gap: 12px; padding: 8px 0; align-items: start; font-size: 12.5px; }
+.timeline-row .ts { color: var(--text-faint); font-family: var(--mono); font-size: 11px; }
+.timeline-row .pin {
+  width: 10px; height: 10px; border-radius: 50%;
+  margin-top: 5px; background: var(--text-faint);
+  position: relative;
+}
+.timeline-row .pin::after {
+  content: ""; position: absolute; top: 14px; left: 4px;
+  width: 2px; height: 32px; background: var(--border);
+}
+.timeline-row:last-child .pin::after { display: none; }
+.timeline-row.event-coder .pin { background: var(--coder); }
+.timeline-row.event-reviewer .pin { background: var(--reviewer); }
+.timeline-row.event-critic .pin { background: var(--critic); }
+.timeline-row.event-architect .pin { background: var(--architect); }
+.timeline-row.event-ci .pin { background: var(--info); }
+.timeline-row.event-merge .pin { background: var(--ok); }
+.timeline-row .desc b { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> claude_admin</div>
+    <div class="proj-switcher"><span><b>claude_admin</b></span><span class="meta">▾</span></div>
+    <h6>Project</h6>
+    <nav>
+      <a href="07-ui-dashboard.html"><span class="ic">▦</span> Dashboard</a>
+      <a href="08-ui-plan.html"><span class="ic">▤</span> Plans</a>
+      <a href="09-ui-breakdown.html"><span class="ic">▥</span> Breakdowns</a>
+      <a class="active" href="10-ui-pr-review.html"><span class="ic">⬢</span> PRs <span class="badge warn">1</span></a>
+      <a href="11-ui-session-live.html"><span class="ic">▶</span> Sessions</a>
+    </nav>
+    <h6>M2 PRs</h6>
+    <nav>
+      <a href="#"><span class="ic">✓</span> PR1 schema</a>
+      <a href="#"><span class="ic">✓</span> PR2 editor</a>
+      <a href="#"><span class="ic">✓</span> PR3 mermaid</a>
+      <a class="active" href="#"><span class="ic">●</span> PR4 history <span class="badge warn">!</span></a>
+      <a href="#"><span class="ic">●</span> PR5 import</a>
+      <a href="#"><span class="ic">○</span> PR6 paste UX</a>
+    </nav>
+    <h6>Design refs</h6>
+    <nav><a href="index.html"><span class="ic">↰</span> Brief</a></nav>
+    <div class="footer">
+      <div class="row"><span>lap-A</span><span style="color:var(--ok)">● online</span></div>
+      <div class="row"><span>lap-B</span><span style="color:var(--ok)">● online</span></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="headerbar">
+      <div class="breadcrumb">
+        <a href="#">claude_admin</a><span class="sep">/</span>
+        <a href="08-ui-plan.html">v2 web admin</a><span class="sep">/</span>
+        <a href="09-ui-breakdown.html">M2</a><span class="sep">/</span>
+        <span class="now">PR4 · history</span>
+      </div>
+      <div class="actions">
+        <a class="btn ghost" href="https://github.com/alf/claude_admin/pull/152" target="_blank">↗ #152</a>
+        <button class="btn ghost">⌘K</button>
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="mock-banner"><b>Mock 10 · PR review.</b> The most-viewed screen. Architect's recommendation prominent. Reviewer findings, critic score, validation gallery, decision UI, timeline. This is "approve and merge" central.</div>
+
+      <!-- pr header -->
+      <div class="pr-head">
+        <div>
+          <div style="display:flex; align-items: center; gap: 10px;">
+            <div class="title">PR4 · Plan history (versioning + diff)</div>
+            <span class="tag info">awaiting your approval</span>
+          </div>
+          <div class="sub">
+            #152 · feature/m2-pr4-plan-history → main · drafted by claude (lap-A) · opened 2h ago · 312 LOC · 8 files
+          </div>
+        </div>
+        <div class="meta-grid">
+          <span class="k">CI</span><span class="v" style="color: var(--ok)">● green (4 / 4)</span>
+          <span class="k">Validation</span><span class="v" style="color: var(--ok)">6 artifacts</span>
+          <span class="k">Reviewers</span><span class="v" style="color: var(--ok)">3 / 3 ✓</span>
+          <span class="k">Critic</span><span class="v" style="color: var(--critic)">89 / 100</span>
+          <span class="k">Spend</span><span class="v">$2.41</span>
+          <span class="k">Attempts</span><span class="v">2 (1 iterate)</span>
+        </div>
+      </div>
+
+      <!-- architect's verdict (prominent) -->
+      <div class="panel accent" style="border-color: var(--ok); background: linear-gradient(180deg, rgba(74,222,128,0.04), transparent);">
+        <div class="panel-head">
+          <h3 style="color: var(--ok)"><span class="tag role-architect">architect</span> &nbsp;Recommends: <b>Accept &amp; merge</b></h3>
+          <span class="meta">decided 2m ago</span>
+        </div>
+        <p style="margin: 8px 0; font-size: 14px; color: var(--text);">
+          PR4 cleanly implements the breakdown's "plan history" goal. All 5 acceptance criteria are met
+          with evidence. The diff view reuses <code>MarkdownEditor</code> from PR2 as planned, and extracts
+          a <code>useMarkdownDiff</code> hook that PR3-followups can reuse.
+        </p>
+        <p style="margin: 8px 0; font-size: 14px;">
+          <b>Merge will:</b> add 2 new tables (<code>plan_versions</code>, <code>plan_revisions</code>),
+          a non-destructive migration M-014, 4 new endpoints. <b>Risks:</b> low — versioning is
+          additive. <b>Rollback:</b> <code>revert + M-014-rollback</code>; tested in dry-run.
+        </p>
+        <p style="margin: 8px 0; font-size: 13px; color: var(--text-dim);">
+          Reviewers: 3 nits, 0 blockers. Critic: 89/100, axes <code>achieves_goal=92, test_coverage=85,
+          no_scope_creep=95, reuses_existing=85</code>. Validation: 6 screenshots covering save → diff
+          → revert flow, plus migration dry-run output.
+        </p>
+
+        <!-- decision bar -->
+        <div class="decision-bar" style="margin: 14px 0 0;">
+          <button class="accept recommended">
+            <span class="lbl-big">✓ Approve &amp; merge</span>
+            <span class="lbl-sub">recommended · ⌘ enter</span>
+          </button>
+          <button class="iterate">
+            <span class="lbl-big">↺ Send back to coder</span>
+            <span class="lbl-sub">override · I want a change</span>
+          </button>
+          <button class="drop">
+            <span class="lbl-big">✕ Drop &amp; close</span>
+            <span class="lbl-sub">override · close PR, edit breakdown</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- tabs -->
+      <div class="tabs" style="margin-top: 24px;">
+        <a class="active" href="#">Overview</a>
+        <a href="#">Reviewers <span class="badge">3</span></a>
+        <a href="#">Critics <span class="badge">3</span></a>
+        <a href="#">Validation <span class="badge">6</span></a>
+        <a href="#">Diff</a>
+        <a href="#">Files (8)</a>
+        <a href="#">CI</a>
+        <a href="#">Timeline</a>
+      </div>
+
+      <!-- main content grid -->
+      <div class="grid cols-2" style="grid-template-columns: 1fr 360px;">
+        <div>
+          <!-- reviewer findings summary -->
+          <h3 class="section-title">Reviewer findings (3 nits, 0 blockers)</h3>
+          <div class="finding">
+            <div class="head">
+              <span class="sev nit">nit</span>
+              <span class="file">src/web/components/PlanHistory.tsx:42</span>
+              <span class="tag role-reviewer">quality</span>
+            </div>
+            <div class="desc">Magic number <code>14</code> for "default visible versions" — extract to constant.</div>
+            <div class="fix">Suggested: <code>const DEFAULT_VISIBLE_VERSIONS = 14;</code></div>
+          </div>
+          <div class="finding">
+            <div class="head">
+              <span class="sev nit">nit</span>
+              <span class="file">src/server/services/plan_version.ts:88</span>
+              <span class="tag role-reviewer">bugs</span>
+            </div>
+            <div class="desc">Off-by-one in pagination cursor when version count is exactly <code>page_size</code>. Doesn't break anything (cursor returns null correctly), but worth noting.</div>
+            <div class="fix">Suggested: add a unit test pinning current behavior.</div>
+          </div>
+          <div class="finding">
+            <div class="head">
+              <span class="sev nit">nit</span>
+              <span class="file">migrations/014_plan_versions.sql:12</span>
+              <span class="tag role-reviewer">security</span>
+            </div>
+            <div class="desc">Index on <code>plan_versions(plan_id, created_at DESC)</code> is fine; consider partial index <code>WHERE NOT deleted</code> if you add soft delete later.</div>
+            <div class="fix">Optional. Defer until soft delete is needed.</div>
+          </div>
+
+          <h3 class="section-title" style="margin-top: 24px;">Acceptance criteria evidence</h3>
+          <table>
+            <thead><tr><th style="width: 60px">AC</th><th>Statement</th><th style="width: 100px">Evidence</th></tr></thead>
+            <tbody>
+              <tr><td style="color: var(--ok)">✓ AC-1</td><td>saving creates a plan_versions row with full body snapshot</td><td>3 unit tests + screenshot 02</td></tr>
+              <tr><td style="color: var(--ok)">✓ AC-2</td><td>version list shows author, timestamp, message</td><td>screenshot 04</td></tr>
+              <tr><td style="color: var(--ok)">✓ AC-3</td><td>side-by-side diff between any two versions</td><td>screenshot 05 + e2e</td></tr>
+              <tr><td style="color: var(--ok)">✓ AC-4</td><td>revert to version X creates a new version (non-destructive)</td><td>2 unit tests + screenshot 06</td></tr>
+              <tr><td style="color: var(--ok)">✓ AC-5</td><td>current 'live' plan = latest version</td><td>covered by AC-1+AC-4 tests</td></tr>
+            </tbody>
+          </table>
+
+          <h3 class="section-title" style="margin-top: 24px;">Validation artifacts</h3>
+          <div class="grid cols-3">
+            <div class="artifact">
+              <div class="thumb">02 · save creates v2</div>
+              <span class="label">screenshot · playwright</span>
+            </div>
+            <div class="artifact">
+              <div class="thumb">04 · version list</div>
+              <span class="label">screenshot · playwright</span>
+            </div>
+            <div class="artifact">
+              <div class="thumb">05 · v2 ↔ v3 diff</div>
+              <span class="label">screenshot · playwright</span>
+            </div>
+            <div class="artifact">
+              <div class="thumb">06 · revert to v1</div>
+              <span class="label">screenshot · playwright</span>
+            </div>
+            <div class="artifact">
+              <div class="thumb">e2e trace.zip</div>
+              <span class="label">trace · playwright</span>
+            </div>
+            <div class="artifact">
+              <div class="thumb">M-014 dry-run</div>
+              <span class="label">log · migration</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- right column -->
+        <div>
+          <!-- critic score card -->
+          <div class="score-card">
+            <div style="display:flex; align-items: baseline; gap: 6px;">
+              <span class="num">89</span><span class="of">/ 100</span>
+              <span class="tag role-critic" style="margin-left: auto;">critic</span>
+            </div>
+            <div class="verdict"><b style="color: var(--ok)">strong</b> · accept threshold 80</div>
+            <div class="axes">
+              <span class="k">achieves_goal</span><span class="v">92</span>
+              <span class="k">test_coverage</span><span class="v">85</span>
+              <span class="k">no_scope_creep</span><span class="v">95</span>
+              <span class="k">reuses_existing</span><span class="v">85</span>
+            </div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-dim);">
+              <b style="color: var(--text);">Rationale.</b> PR cleanly implements the breakdown's goal.
+              <code>useMarkdownDiff</code> is correctly extracted as planned. One lingering concern: the
+              versioning service duplicates a small piece of logic from <code>plan_service.save()</code>
+              that could be a single transaction — flagging for a follow-up refactor PR, not a blocker
+              here. Test coverage for revert edge cases (revert to deleted milestone, revert across
+              schema migration) is reasonable but not exhaustive.
+            </div>
+            <div style="margin-top: 8px;"><a href="#" style="font-size: 12px; font-family: var(--mono);">view all 3 critics →</a></div>
+          </div>
+
+          <!-- timeline -->
+          <h3 class="section-title">Timeline</h3>
+          <div>
+            <div class="timeline-row event-architect">
+              <span class="ts">2m</span><span class="pin"></span>
+              <div class="desc"><b>Architect</b> recommends accept · score 89, validation passing, CI green</div>
+            </div>
+            <div class="timeline-row event-ci">
+              <span class="ts">8m</span><span class="pin"></span>
+              <div class="desc"><b>CI</b> turned green · 4/4 checks passed</div>
+            </div>
+            <div class="timeline-row event-architect">
+              <span class="ts">12m</span><span class="pin"></span>
+              <div class="desc"><b>Architect</b> promoted draft → ready</div>
+            </div>
+            <div class="timeline-row event-critic">
+              <span class="ts">14m</span><span class="pin"></span>
+              <div class="desc"><b>Critic (goal_alignment)</b> 92 · "implements breakdown goal cleanly"</div>
+            </div>
+            <div class="timeline-row event-reviewer">
+              <span class="ts">17m</span><span class="pin"></span>
+              <div class="desc"><b>Reviewers</b> done · 3 nits, 0 blockers</div>
+            </div>
+            <div class="timeline-row event-coder">
+              <span class="ts">22m</span><span class="pin"></span>
+              <div class="desc"><b>Coder</b> pushed update (round 2): error toasts on save fail · iterate addressed</div>
+            </div>
+            <div class="timeline-row event-architect">
+              <span class="ts">38m</span><span class="pin"></span>
+              <div class="desc"><b>Architect</b> sent iterate · 1 blocker (no error toasts on upload fail)</div>
+            </div>
+            <div class="timeline-row event-coder">
+              <span class="ts">1h</span><span class="pin"></span>
+              <div class="desc"><b>Coder</b> drafted PR · attempt 1, 47m elapsed</div>
+            </div>
+          </div>
+          <div style="margin-top: 8px;"><a href="#" style="font-size: 12px; font-family: var(--mono);">full timeline →</a></div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>Brainstorm prompts</h4>
+        <ul>
+          <li>Should the architect's "Recommends: Accept &amp; merge" panel be the entire screen above-fold, with everything else as collapsed sections? Currently it's the focal point but you can scroll past it.</li>
+          <li>Decision buttons: do we need keyboard shortcuts (⌘↵ for accept) for fast approval flow?</li>
+          <li>For "Iterate" override: should clicking it open a modal where you write what you want changed, or just send the architect's existing iterate bundle?</li>
+          <li>Validation artifacts: are 6 thumbnails enough, or should we always show full-size with click-to-zoom?</li>
+          <li>Should AC evidence table link directly to the test file / line?</li>
+          <li>Do we want a "raw diff" view inline, or always GH-link out for the full diff?</li>
+          <li>"Approve &amp; merge" actually merges. Or should it kick off the GH approval flow and require a final click on GH?</li>
+        </ul>
+      </div>
+
+      <p style="margin-top:32px"><a href="09-ui-breakdown.html">← 09 · breakdown</a> · next: <a href="11-ui-session-live.html">11 · live session →</a></p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

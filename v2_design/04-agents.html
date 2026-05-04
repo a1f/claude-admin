@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>04 · agents — claude_admin v2</title>
+<link rel="stylesheet" href="theme.css" />
+<script src="_mermaid-init.js" defer></script>
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">claude_admin / v2 / 04 · agents</span>
+  <span class="crumb"><a href="index.html">← brief</a> · 01 <a href="01-system-overview.html">overview</a> · 02 <a href="02-workflow.html">workflow</a> · 03 <a href="03-data-model.html">data</a> · 05 <a href="05-roadmap.html">roadmap</a></span>
+</div>
+
+<main class="app">
+  <h1>Agents &amp; orchestration</h1>
+  <p class="lede">
+    Five roles. The architect is the boss; everyone else is a tool the architect uses. Coder is interactive
+    (long-running tmux session, can ask questions). Reviewers, critics, validators are headless — short Claude
+    API calls returning structured output.
+  </p>
+
+  <h2>Roles at a glance</h2>
+  <div class="grid cols-2">
+    <div class="card">
+      <h3 style="margin-top:0"><span class="tag role-architect">architect</span> &nbsp;Architect</h3>
+      <p class="lede">Server-side. Owns dispatch &amp; decisions. Never touches code itself.</p>
+      <h4>Inputs</h4>
+      <ul class="clean">
+        <li>· Plan + breakdown for context</li>
+        <li>· Reviewer findings + critic scores per PR</li>
+        <li>· CI signals, validation artifacts</li>
+        <li>· User overrides</li>
+      </ul>
+      <h4>Outputs</h4>
+      <ul class="clean">
+        <li>· Dispatch decisions (which PRs to start in parallel)</li>
+        <li>· Drop / iterate / accept verdicts with rationale</li>
+        <li>· Coder feedback bundles</li>
+        <li>· User-approval requests with explanation</li>
+        <li>· Self-improvement &amp; reconciliation notes</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0"><span class="tag role-coder">coder</span> &nbsp;Coder</h3>
+      <p class="lede">Long-running interactive Claude in a tmux pane on a laptop, working in a fresh worktree.</p>
+      <h4>Inputs</h4>
+      <ul class="clean">
+        <li>· PlannedPR.spec_md + acceptance_criteria_md</li>
+        <li>· Plan context (parent goal, what other PRs do)</li>
+        <li>· Repo at base branch + worktree</li>
+        <li>· On iterate: feedback bundle from architect</li>
+      </ul>
+      <h4>Outputs</h4>
+      <ul class="clean">
+        <li>· Pushed branch + draft GH PR (linked back to PlannedPR)</li>
+        <li>· "ready" signal (via daemon hook) — all tasks done, tests written, PR drafted</li>
+        <li>· Notes / open questions on entries it deferred</li>
+      </ul>
+      <h4>Limits</h4>
+      <ul class="clean">
+        <li>· Cannot merge. Cannot delete branches. Cannot rewrite history of other PRs.</li>
+        <li>· Sandboxed to its own worktree path.</li>
+        <li>· Time / token budget per attempt; over budget → architect notified.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0"><span class="tag role-reviewer">reviewer</span> &nbsp;Reviewer</h3>
+      <p class="lede">Headless Claude API call. Multiple kinds run in parallel against the diff.</p>
+      <h4>Variants</h4>
+      <ul class="clean">
+        <li>· <b>security</b> — auth, secrets, injection, supply chain</li>
+        <li>· <b>bugs</b> — logic errors, edge cases, off-by-one</li>
+        <li>· <b>quality</b> — style, naming, dead code, abstraction</li>
+        <li>· <b>perf</b> (when flagged) — hot path, allocation, query shape</li>
+        <li>· <b>custom</b> (per-project) — user-defined checklists</li>
+      </ul>
+      <h4>Output contract</h4>
+      <p class="lede">Structured JSON: <code>{summary, findings: [{severity, file, lines, desc, suggested_fix}]}</code>. See <a href="03-data-model.html">03 · data model</a>.</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0"><span class="tag role-critic">critic</span> &nbsp;Critic</h3>
+      <p class="lede">Headless Claude API call with strong adversarial prompt. Scores 1–100.</p>
+      <h4>Variants</h4>
+      <ul class="clean">
+        <li>· <b>goal_alignment</b> — does the diff actually do what the PlannedPR said?</li>
+        <li>· <b>acceptance_check</b> — does each acceptance criterion have evidence?</li>
+        <li>· <b>plan_drift</b> — does this PR break assumptions in downstream PRs?</li>
+      </ul>
+      <h4>Why separate from reviewer</h4>
+      <p class="lede">
+        Reviewers chase <i>defects in the code</i>. Critics chase <i>defects in the goal-fit</i>. A PR can be
+        defect-free and still solve the wrong problem. Critics catch that.
+      </p>
+      <h4>Score floor</h4>
+      <p class="lede">Default thresholds: ≥80 accept, 60–79 iterate, &lt;60 drop. Per-project tunable.</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">CI watcher</h3>
+      <p class="lede">
+        Polls/listens to GitHub checks for the PR. Reports green/red back to architect. On red,
+        bundles failing logs and forwards to the coder for fix-on-red.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Validator</h3>
+      <p class="lede">
+        Runs the validation gate: playwright e2e, screenshot capture, migration dry-run, perf bench, etc.
+        Stores results as Artifacts. Can run on the laptop (via daemon) or on the server.
+      </p>
+    </div>
+  </div>
+
+  <h2>Dispatch sequence</h2>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Arch as Architect
+  participant Q as Job queue
+  participant D as Daemon
+  participant Cdr as Coder (Claude/tmux)
+  participant GH as GitHub
+
+  Arch->>Arch: scan breakdown for ready PlannedPRs<br/>(deps merged or none)
+  Arch->>Arch: pick parallelizable subset<br/>(respecting parallelization map)
+  loop for each picked PR
+    Arch->>Q: enqueue dispatch job
+    Q->>D: cmd(spawn_session, worktree, prompt)
+    D->>D: git worktree add <branch>
+    D->>D: tmux new-window + send prompt
+    D-->>Arch: session_id
+    Arch->>Arch: PlannedPR -> coding
+    Cdr->>Cdr: works
+    Cdr->>GH: gh pr create --draft
+    Cdr-->>D: signal "ready"
+    D-->>Arch: PlannedPR -> drafted, with PR url
+  end
+    </div>
+  </div>
+
+  <h2>Review + critique fan-out</h2>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Arch as Architect
+  participant Q as Job queue
+  participant API as Claude API
+  participant DB as Postgres
+
+  Arch->>Q: enqueue review jobs<br/>(security, bugs, quality)
+  Arch->>Q: enqueue critique jobs<br/>(goal_alignment, acceptance_check, plan_drift)
+  par
+    Q->>API: review(security, diff, plan_ctx)
+    API-->>Q: findings
+    Q->>DB: store Review row
+  and
+    Q->>API: review(bugs, ...)
+    API-->>Q: findings
+    Q->>DB: store
+  and
+    Q->>API: critique(goal_alignment, ...)
+    API-->>Q: score+rationale
+    Q->>DB: store Critique
+  and
+    Q->>API: critique(acceptance_check, ...)
+    API-->>Q: score+rationale
+    Q->>DB: store
+  end
+  DB-->>Arch: all jobs done<br/>(SUM(running)=0 pubsub)
+  Arch->>Arch: aggregate, decide
+    </div>
+    <div class="caption">All API calls run concurrently. Architect aggregates only after all are done.</div>
+  </div>
+
+  <h2>Iterate feedback bundle</h2>
+  <p class="lede">
+    When the architect chooses <b>iterate</b>, it doesn't dump raw reviewer JSON at the coder. It produces a
+    curated bundle: <i>here's what to fix, in what order, why</i>.
+  </p>
+<pre>// example feedback bundle (markdown sent to coder)
+## Iteration #2 — please address the following before re-drafting
+
+### Blockers (must fix)
+1. **`src/auth/session.ts:82-109`** — session token in localStorage. The `security` reviewer
+   flagged this; we agreed at plan time we'd use cookies. Switch to httpOnly cookies, fall back
+   to localStorage only when SameSite=None is unavailable.
+
+2. **Acceptance criterion AC-3 not satisfied** — "logged-in user can refresh and stay logged in".
+   The current implementation doesn't persist auth across reload because the cookie isn't set on
+   `/auth/callback`. Add the cookie before the redirect.
+
+### Nits (optional, fix if cheap)
+- `src/ui/Sidebar.tsx` — magic number 240. Extract `SIDEBAR_WIDTH_PX`.
+
+### Notes from critic (score 71/100)
+The critic flagged plan drift: this PR added a `User.preferences` field that's not in the data
+model in the plan. Either remove it (preferred) or update the plan in milestone M2.
+
+### What we are NOT changing
+The cookie-vs-localStorage decision is final — don't ask again.
+</pre>
+
+  <h2>Architect prompt template (sketch)</h2>
+  <p class="lede">The architect itself is an LLM call when it needs to write rationale or feedback. The decision logic is rule-based + LLM rationale.</p>
+<pre>You are the Architect for project {project.name}. Plan: {plan.title}.
+Milestone {milestone.title} goal: {milestone.goal}.
+
+PlannedPR {pr.id}: {pr.title}
+Spec:
+{pr.spec_md}
+
+Acceptance criteria:
+{pr.acceptance_criteria_md}
+
+Diff (truncated to {N} files): {diff}
+
+Reviewer findings:
+{reviews_json}
+
+Critic verdicts:
+{critiques_json}
+
+Validation:
+{validation_summary}
+
+Decide: drop / iterate / accept.
+
+Output JSON:
+{
+  "decision": "drop" | "iterate" | "accept",
+  "reasoning_md": "...",
+  "feedback_bundle_md": "..." (if iterate),
+  "drop_reason_md": "..." (if drop),
+  "next_step_for_user": "..." (if accept)
+}</pre>
+
+  <h2>Coder fix-on-red loop</h2>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Arch as Architect
+  participant CI as GitHub CI
+  participant Cdr as Coder
+  CI-->>Arch: checks failed (logs)
+  Arch->>Arch: parse failure, identify likely cause
+  Arch->>Cdr: "CI red — failure: {failure_summary}.<br/>Fix and push."
+  Cdr-->>Arch: pushed fix
+  Arch->>CI: re-run checks
+  CI-->>Arch: green / red
+  alt still red after N attempts
+    Arch->>Arch: escalate to user
+  end
+    </div>
+  </div>
+
+  <h2>Validation runner</h2>
+  <table>
+    <thead><tr><th>Validator</th><th>Where it runs</th><th>Inputs</th><th>Outputs</th></tr></thead>
+    <tbody>
+      <tr><td>playwright</td><td>Daemon (laptop has the dev env) or server (if dockerized preview)</td><td>PR branch, e2e scenario list</td><td>Screenshots, video, trace.zip</td></tr>
+      <tr><td>e2e_script</td><td>Daemon</td><td>Scenario shell script in repo</td><td>Stdout log + exit code</td></tr>
+      <tr><td>migration_dryrun</td><td>Server (against staging DB clone)</td><td>Migration files</td><td>Plan, lock-acquire times, rollback test</td></tr>
+      <tr><td>bench</td><td>CI (existing infra)</td><td>Benchmark harness</td><td>JSON delta + flamegraph</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Tool / model budgets</h2>
+  <p class="lede">Per-role defaults — tunable. Hard caps prevent runaway cost.</p>
+  <table>
+    <thead><tr><th>Role</th><th>Model</th><th>Max tokens / call</th><th>Hard time cap</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Coder</td><td>Opus (interactive)</td><td>—</td><td>2h per attempt</td><td>Long-running. Budget-tracked, not per-call.</td></tr>
+      <tr><td>Reviewer (security/bugs)</td><td>Sonnet</td><td>30k input, 4k output</td><td>2 min</td><td>Diff + targeted file content.</td></tr>
+      <tr><td>Reviewer (quality)</td><td>Haiku</td><td>20k in, 4k out</td><td>1 min</td><td>Cheaper class.</td></tr>
+      <tr><td>Critic</td><td>Opus</td><td>40k in, 6k out</td><td>3 min</td><td>Quality matters more — adversarial.</td></tr>
+      <tr><td>Architect (rationale)</td><td>Sonnet</td><td>20k in, 4k out</td><td>1 min</td><td>Decision is rule-based; LLM only writes rationale.</td></tr>
+      <tr><td>Final critique</td><td>Opus</td><td>100k in, 8k out</td><td>10 min</td><td>Reads merged code + tests + plan.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Self-improvement &amp; final critique</h2>
+
+  <h3>Self-improvement (after each merge)</h3>
+  <p class="lede">Compare what we said the PR would do vs what shipped vs what reviewers caught. Output is a tiny markdown file added to a per-project <code>retrospective.md</code>. User reviews; some get applied to prompt templates.</p>
+
+  <h3>Final critique (after milestone)</h3>
+  <p class="lede">Heavy. Re-reads the milestone description, walks merged code, runs the test suite end-to-end, exercises deployed feature via Playwright. Verdict: passed / gaps_found. Gaps become new PlannedPRs in the same milestone — milestone state goes back to <code>in_flight</code>.</p>
+
+  <div class="callout q">
+    <b>Brainstorm prompts.</b>
+    <ul>
+      <li>How do we keep coders honest about "tests written" — a final reviewer check that asserts test coverage delta?</li>
+      <li>Should architect have an explicit "ask user mid-PR" channel, or is going-back-to-plan the only escape hatch?</li>
+      <li>For critique adversarial framing: do we use a single critic with multiple axes, or N independent critics that never see each other?</li>
+      <li>Should the daemon stream coder progress (e.g. partial commits) so architect can intervene mid-run, or wait for coder to signal "ready"?</li>
+    </ul>
+  </div>
+
+  <p style="margin-top:48px"><a href="03-data-model.html">← 03 · data model</a> · next: <a href="05-roadmap.html">05 · roadmap →</a></p>
+</main>
+</body>
+</html>

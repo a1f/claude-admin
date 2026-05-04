@@ -60,6 +60,30 @@
           "merged_at": "2026-05-04",
           "phase": "merged",
           "note": "manual dispatch (orchestrator still building)"
+        },
+        "M0-T3": {
+          "manual": true,
+          "branch": "M0-T3",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/6",
+          "started_at": "2026-05-04",
+          "phase": "drafted",
+          "note": "parallel with T4 + T5 (all branched from main after T2 merged)"
+        },
+        "M0-T4": {
+          "manual": true,
+          "branch": "M0-T4",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/7",
+          "started_at": "2026-05-04",
+          "phase": "drafted",
+          "note": "parallel with T3 + T5"
+        },
+        "M0-T5": {
+          "manual": true,
+          "branch": "M0-T5",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/8",
+          "started_at": "2026-05-04",
+          "phase": "drafted",
+          "note": "parallel with T3 + T4"
         }
       }
     },

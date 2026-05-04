@@ -51,6 +51,15 @@
           "merged_at": "2026-05-03",
           "phase": "merged",
           "note": "manual dispatch — orchestrator not yet built; M0-T1 is the bootstrap"
+        },
+        "M0-T2": {
+          "manual": true,
+          "branch": "M0-T2",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/5",
+          "started_at": "2026-05-03",
+          "merged_at": "2026-05-04",
+          "phase": "merged",
+          "note": "manual dispatch (orchestrator still building)"
         }
       }
     },

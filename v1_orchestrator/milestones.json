@@ -1,0 +1,224 @@
+{
+  "$schema_version": 1,
+  "plan_codename": "ca_v1",
+  "plan_title": "claude_admin v1 — local Rust orchestrator",
+  "gh_repo": "a1f/claude-admin",
+  "default_base": "main",
+  "stack": {
+    "daemon": "Rust",
+    "task_processor": "Rust",
+    "tui": "Rust + ratatui",
+    "ipc": "Unix domain socket + serde JSON-RPC",
+    "state": "SQLite at ~/.work/ca.db",
+    "architector_runtime": "interactive claude session in tmux pane",
+    "coder_runtime": "interactive claude session in tmux pane",
+    "reviewer_critic_runtime": "claude -p headless subprocesses"
+  },
+  "milestones": [
+    {
+      "id": "M0",
+      "title": "Foundation",
+      "phase": "foundation",
+      "kind": "infra",
+      "goal": "Archive existing Rust crates to a legacy/ branch. New Rust workspace scaffolded: ca-lib (shared types + serde), ca-daemon (binary), ca (CLI binary), ca-tui (binary, ratatui). CI gates green: cargo fmt-check, cargo lint-strict, cargo test --workspace --all-targets.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Archive existing crates: git checkout -b legacy/pre-v1, push, then rm crates/* on main",
+        "Cargo workspace scaffold: ca-lib + ca-daemon + ca + ca-tui crates with placeholder mains",
+        "ca-lib types: Architector, Task, Commit, ReviewResult, CritiqueResult — serde-serializable",
+        "Lint/format configs: rustfmt.toml, clippy.toml, .github/workflows/ci.yml",
+        "README updated for v1: how to build, layout, where v2_design lives"
+      ],
+      "exit_criteria": "fresh clone → cargo build --workspace green; CI runs fmt + clippy + test",
+      "risk": "low",
+      "depends_on": [],
+      "status": "broken_down",
+      "reuses": "(cleanup of old crates)",
+      "breakdown": {
+        "issue_url": "https://github.com/a1f/claude-admin/issues/3",
+        "local_file": "/Users/alf/dev/claude_admin/v1_orchestrator/breakdowns/M0.md",
+        "task_count": 5,
+        "total_loc_estimate": 400,
+        "task_ids": ["M0-T1", "M0-T2", "M0-T3", "M0-T4", "M0-T5"],
+        "created_at": "2026-05-03"
+      }
+    },
+    {
+      "id": "M1",
+      "title": "Daemon + UDS protocol",
+      "phase": "foundation",
+      "kind": "api",
+      "goal": "ca-daemon binary that runs in foreground, listens on UDS (~/.work/ca.sock), exposes versioned JSON-RPC. Persistent state in SQLite. ca CLI talks to daemon: ca ping, ca version. Heartbeat + reconnect logic on the client side.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "ca-daemon: tokio runtime, UDS bind on ~/.work/ca.sock, graceful shutdown",
+        "JSON-RPC framing (newline-delimited JSON) + protocol version handshake",
+        "SQLite schema (architectors, tasks, dispatches, reviews) + sqlx-migrate",
+        "ca CLI subcommands: ping, version, daemon (foreground), with retry+backoff client"
+      ],
+      "exit_criteria": "ca daemon starts; ca ping from another shell returns daemon version; daemon survives kill -TERM gracefully (drains in-flight requests)",
+      "risk": "medium",
+      "depends_on": ["M0"],
+      "status": "planned",
+      "reuses": "concepts from old `daemon` crate (pid file, socket pattern)"
+    },
+    {
+      "id": "M2",
+      "title": "Architector lifecycle",
+      "phase": "core",
+      "kind": "api",
+      "goal": "Architector is one interactive claude session per (repo, milestone), running in a tmux pane with the architector SKILL.md as its system prompt. Lifecycle: ca architect register opens the pane and registers state in daemon. Architector calls back into daemon via the ca CLI from its Bash tool (no MCP). Persistent across daemon restart.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "ca architect register --repo --milestone --issue: writes Architector row, opens tmux pane",
+        "tmux orchestration: session 'claude-admin', window per architector named '<repo>:<milestone>', send-keys to start claude with architector skill",
+        "skills/architector/SKILL.md: identity, allowed daemon RPCs, decision rubric, when to ask user",
+        "ca architect list / ca architect attach / ca architect kill",
+        "Recovery: on daemon start, re-load architectors from DB; mark stale tmux panes"
+      ],
+      "exit_criteria": "ca architect register opens a working architector that can call ca task list and see itself; architector survives daemon restart (state preserved, pane re-attached)",
+      "risk": "medium",
+      "depends_on": ["M1"],
+      "status": "planned",
+      "reuses": "tmux integration patterns from old ca-lib"
+    },
+    {
+      "id": "M3",
+      "title": "Breakdown + task model",
+      "phase": "core",
+      "kind": "api",
+      "goal": "Architector invokes breakdown to turn its issue into PR-shaped tasks (with validation + test scenarios). Tasks persist in daemon DB. ca task list/get/show. Critique pass after breakdown verifies tasks lead to milestone goal — if not, breakdown re-runs.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Port breakdown logic to Rust: read issue body via gh, draft tasks, write to DB, mirror to GH issue checklist",
+        "ca task list / ca task get <id> / ca task show <id> commands",
+        "Critique step after breakdown: claude -p judges 'does this task list actually accomplish the milestone?' — must pass before tasks become dispatchable",
+        "tasks.md per architector kept in sync with DB (file is human-readable mirror)"
+      ],
+      "exit_criteria": "ca task list shows the breakdown for a real milestone; the post-breakdown critique passes on at least 2 milestones",
+      "risk": "medium",
+      "depends_on": ["M2"],
+      "status": "planned",
+      "reuses": "skills/breakdown/SKILL.md + templates/issue.md + templates/task.md"
+    },
+    {
+      "id": "M4",
+      "title": "Task-processor + coder dispatch",
+      "phase": "dispatch",
+      "kind": "api",
+      "goal": "ca-task-processor binary, one process per dispatched task. Daemon spawns it. Task-processor breaks the task into sub-actions (saved to tasks.md inside the worktree), then for each: spawns coder in a tmux pane (claude with coder SKILL.md), watches for commits, signals architector. Coder gets fresh worktree. git push works (gh auth setup-git fix).",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "ca-task-processor binary: state machine (read_task, plan_actions, await_coder, await_review, decide), UDS to daemon",
+        "git worktree creation + gh auth setup-git so git push works in subprocess context",
+        "Sub-action planning: claude -p call to break task into commits (test scenarios are sub-actions too); writes tasks.md to worktree",
+        "Coder dispatch: tmux pane with claude + coder SKILL.md, --strict-mcp-config, --disallowedTools 'mcp__*'",
+        "Commit watcher: poll git log on the branch + heuristic to know when coder's done with a sub-action"
+      ],
+      "exit_criteria": "Dispatching one task end-to-end: worktree → coder writes commits → task-processor sees them; coder is attachable in tmux; git push works first try",
+      "risk": "high",
+      "depends_on": ["M3"],
+      "reuses": "skills/coder/SKILL.md + dispatch.py / watcher.py logic ported to Rust",
+      "status": "planned"
+    },
+    {
+      "id": "M5",
+      "title": "Reviewer + critic fan-out",
+      "phase": "review",
+      "kind": "api",
+      "goal": "After each commit (or after coder signals done), task-processor fans out reviewers (3 kinds) + critics (3-5 instances) as claude -p subprocesses with their respective SKILL.md as system prompt. JSON output parsed, median scores computed, structured findings stored. Findings posted as PR review comments.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Spawn pool: parallel claude -p subprocs with timeout + result aggregation",
+        "Output parser robust to markdown fences / prose-around-JSON (port from watcher.py)",
+        "Median score + recommendation logic (accept ≥80 / iterate 60-79 / drop <60); blocker findings force iterate",
+        "PR comment composer: consolidated markdown comment via gh pr comment"
+      ],
+      "exit_criteria": "On a real PR: 3 reviewer + 5 critic outputs land within 3 min, aggregated comment posted, recommendation correct on 3/3 test PRs (one accept, one iterate, one drop)",
+      "risk": "high",
+      "depends_on": ["M4"],
+      "reuses": "skills/reviewer/SKILL.md + skills/critic/SKILL.md + watcher.py aggregation logic",
+      "status": "planned"
+    },
+    {
+      "id": "M6",
+      "title": "Architector decision loop",
+      "phase": "review",
+      "kind": "core",
+      "goal": "Architector receives review/critique results from daemon, decides drop/accept/fix per coder-attempt, updates tasks.md after every decision to stay aligned with milestone goal. Max 3 fix rounds per task. Surfaces to user when stuck, when plan changes dramatically, or on confidence-low decisions. Per-task closure: 3 critics + 3 quality/bugs/test agents score the whole task; median ≥ threshold to advance.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "Architector skill body: decision rubric (drop/accept/fix), update-tasks.md protocol, when-to-ask-user rules",
+        "Daemon RPC: ca task decide / ca task fix-feedback / ca task close",
+        "Fix-round counter; after 3 rounds, escalate to user automatically",
+        "Per-task closure critique fan-out (3+3 agents) when sub-actions all done",
+        "User-input request channel: daemon writes pending-input rows; TUI surfaces them; user replies via ca user-respond"
+      ],
+      "exit_criteria": "On one real task: drop+iterate+accept all observed; tasks.md edits reflect decisions; one user-input request shown in TUI and answered",
+      "risk": "high",
+      "depends_on": ["M5"],
+      "reuses": "skills/pr-babysit/SKILL.md decision logic + improver SKILL.md ideas",
+      "status": "planned"
+    },
+    {
+      "id": "M7",
+      "title": "TUI v0",
+      "phase": "tui",
+      "kind": "ui",
+      "goal": "ratatui-based TUI client connecting to daemon over UDS. Shows: list of architectors with progress bars per milestone, expandable task list per architector, per-task progress, needs-input alerts highlighted at top, log tail per agent. HTML mocks first (in v1_orchestrator/mocks/), iterated until you say go, then ported to ratatui.",
+      "pr_count_target": 6,
+      "raw_prs": [
+        "HTML mocks: dashboard, architector detail, task detail, needs-input modal, settings — all in v1_orchestrator/mocks/ (browsable like v2_design)",
+        "ratatui app skeleton + UDS client + state subscription",
+        "Dashboard view: architectors list, milestone progress bars, alerts pinned at top",
+        "Architector detail view: task list + status + per-task progress",
+        "Task detail view: sub-actions, agent logs (tail), decision history",
+        "Needs-input flow: modal in TUI; ca user-respond on submit"
+      ],
+      "exit_criteria": "TUI shows live data from a real architector + tasks; needs-input flow works end-to-end",
+      "risk": "medium",
+      "depends_on": ["M6"],
+      "reuses": "v2_design mock styling (theme.css, ui-shell.css)",
+      "status": "planned"
+    },
+    {
+      "id": "M8",
+      "title": "Validation gate",
+      "phase": "gate",
+      "kind": "api",
+      "goal": "Plugin validator framework: per-project config declares required validators (Playwright, e2e shell scripts, migration dry-run, perf bench, custom). Architector cannot accept a task until required validators pass with stored artifacts (screenshots, logs). Artifacts surfaced in TUI's task detail view.",
+      "pr_count_target": 5,
+      "raw_prs": [
+        "ValidationRun + Artifact tables in DB; runner abstraction",
+        "Playwright validator: spawn chromium, run scenario script, capture screenshots + trace.zip",
+        "Shell-script validator: exec a per-project test script in worktree, capture stdout + exit code",
+        "Architector gate: refuse 'accept' decision unless required validators ran + passed",
+        "TUI artifact gallery: thumbnails + click-to-open for screenshots, log viewer for logs"
+      ],
+      "exit_criteria": "A UI-touching task cannot be accepted without ≥1 screenshot artifact; the screenshot is visible in the TUI",
+      "risk": "medium",
+      "depends_on": ["M7"],
+      "reuses": "v2_design validation gate spec",
+      "status": "planned"
+    },
+    {
+      "id": "M9",
+      "title": "End-to-end shipping + milestone closure",
+      "phase": "merge",
+      "kind": "core",
+      "goal": "When all tasks in a milestone close, architector triggers final critique: 3-5 critics score milestone completeness 1-100 against the original goal. Median ≥ threshold ships the milestone (TUI shows shipped). Below threshold → architector adds gap-filling tasks back into tasks.md. Plan reconciliation: improver/test-builder/revisit invoked per merged PR; outputs stored, surfaced in TUI for the human to act on.",
+      "pr_count_target": 4,
+      "raw_prs": [
+        "Final milestone critique: spawn 3-5 critic claude -p calls evaluating milestone-level completion; aggregate; verdict",
+        "Gap-to-task: when verdict 'gaps_found', add new tasks to architector's tasks.md and re-enter dispatch loop",
+        "Per-merge plan reconciliation: improver + test-builder + revisit run; outputs land in DB + TUI",
+        "Milestone-shipped UI: timeline, links to all merged PRs, final verdict, retros"
+      ],
+      "exit_criteria": "First milestone shipped end-to-end through ca_v1 itself (probably M0 of ca_v1 — meta!)",
+      "risk": "medium",
+      "depends_on": ["M8"],
+      "reuses": "skills/improver + skills/test-builder + skills/revisit SKILL.md",
+      "status": "planned"
+    }
+  ]
+}

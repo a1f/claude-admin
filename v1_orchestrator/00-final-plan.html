@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ca_v1 · final plan</title>
+<link rel="stylesheet" href="../v2_design/theme.css" />
+<script src="../v2_design/_mermaid-init.js" defer></script>
+<style>
+.hero { background: linear-gradient(180deg, rgba(125,211,252,0.06), transparent); border: 1px solid var(--accent); border-radius: 12px; padding: 22px 26px; margin-bottom: 24px; }
+.hero h1 { margin: 0 0 4px; font-size: 30px; }
+.hero .sub { color: var(--text-dim); font-family: var(--mono); font-size: 13px; }
+.hero .stamps { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.locked-table th { color: var(--text-faint); }
+.locked-table td.choice { color: var(--accent); font-family: var(--mono); font-weight: 600; }
+.ms { display: grid; grid-template-columns: 90px 1fr; gap: 16px; align-items: start; padding: 14px 18px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; }
+.ms .id { font-family: var(--mono); font-size: 18px; color: var(--accent); font-weight: 700; }
+.ms .id .sub { display:block; font-size: 9px; color: var(--text-faint); font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+.ms h3 { margin-top: 0; color: var(--text); font-family: var(--sans); font-size: 15px; }
+.ms .goal { color: var(--text-dim); font-style: italic; margin-bottom: 8px; font-size: 12.5px; }
+.ms ol { margin: 0; padding-left: 18px; font-size: 12.5px; }
+.ms ol li { padding: 1px 0; }
+.ms .meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+.ms.foundation { border-left: 3px solid var(--accent); }
+.ms.core       { border-left: 3px solid var(--accent-2); }
+.ms.dispatch   { border-left: 3px solid var(--coder); }
+.ms.review     { border-left: 3px solid var(--reviewer); }
+.ms.tui        { border-left: 3px solid var(--info); }
+.ms.gate       { border-left: 3px solid var(--critic); }
+.ms.merge      { border-left: 3px solid var(--ok); }
+.section-header { display: flex; align-items: center; gap: 12px; margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--border); }
+.section-header h2 { border: none; padding: 0; margin: 0; }
+.section-header .num { font-family: var(--mono); color: var(--text-faint); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">claude_admin / ca_v1 / final plan</span>
+  <span class="crumb"><a href="../v2_design/00-final-plan.html">v2_design (future)</a></span>
+</div>
+
+<main class="app">
+
+  <div class="hero">
+    <div class="sub">claude_admin · v1 · local Rust orchestrator · v1 step toward v2_design web admin</div>
+    <h1>ca_v1 — final plan</h1>
+    <p class="lede" style="margin-top: 8px;">
+      Local-machine Rust orchestrator: a daemon that owns claude sessions, an architector per (repo, milestone), task-processors per dispatched task, and a TUI client. v2_design's web admin grows from this foundation later (web server replaces TUI as another client; remote-machine support added).
+    </p>
+    <div class="stamps">
+      <span class="tag ok">decisions locked 2026-05-03</span>
+      <span class="tag info">9 milestones · ~47 PRs</span>
+      <span class="tag draft">execution not yet started</span>
+    </div>
+  </div>
+
+  <div class="section-header"><span class="num">§1</span><h2>Locked decisions</h2></div>
+  <table class="locked-table">
+    <thead><tr><th>Decision</th><th>Choice</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Stack</td><td class="choice">Rust everywhere</td><td>ca-daemon, ca-task-processor, ca CLI, ca-tui all Rust. ca-lib shared types.</td></tr>
+      <tr><td>IPC</td><td class="choice">UDS + JSON-RPC</td><td>Newline-delimited JSON over Unix socket at <code>~/.work/ca.sock</code>. No MCP.</td></tr>
+      <tr><td>State</td><td class="choice">SQLite at ~/.work/ca.db</td><td>Single source of truth for architectors, tasks, decisions, reviews, artifacts.</td></tr>
+      <tr><td>Architector runtime</td><td class="choice">Long-running interactive claude session</td><td>One tmux pane per (repo, milestone). architector SKILL.md as system prompt. Talks to daemon via <code>ca</code> CLI in its Bash tool.</td></tr>
+      <tr><td>Coder runtime</td><td class="choice">tmux pane with interactive claude</td><td>Visible/attachable. coder SKILL.md as system prompt. Fresh worktree per task.</td></tr>
+      <tr><td>Reviewer / critic runtime</td><td class="choice">claude -p headless subprocesses</td><td>Same pattern as the existing watcher.py. Output parsed as JSON.</td></tr>
+      <tr><td>Multi-machine</td><td class="choice">Single-machine v1; architecture-aware</td><td>Daemon is local-only for v1. Protocol designed so a remote daemon-bridge service can be added without breaking changes.</td></tr>
+      <tr><td>v2_design relationship</td><td class="choice">Sequential phases of one project</td><td>Finish ca_v1 first. v2_design becomes the next plan, building the web admin on top of this daemon.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-header"><span class="num">§2</span><h2>Architecture</h2></div>
+  <div class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph LM[Local machine]
+    direction TB
+    DAE[ca-daemon · Rust<br/>UDS server · SQLite · state machine]
+    subgraph PER_MILESTONE[Per repo,milestone]
+      direction TB
+      ARCH[architector · interactive claude session<br/>tmux pane · architector SKILL]
+      subgraph PER_TASK[Per dispatched task]
+        direction TB
+        TP[ca-task-processor · Rust<br/>state machine · UDS to daemon]
+        COD[coder · interactive claude session<br/>tmux pane · coder SKILL · worktree]
+        REV[3 reviewers · claude -p<br/>security · bugs · quality]
+        CRT[3-5 critics · claude -p<br/>goal_alignment]
+        TP --> COD
+        TP --> REV
+        TP --> CRT
+      end
+      ARCH --> TP
+    end
+    DAE --- ARCH
+    DAE --- TP
+    TUI[ca-tui · ratatui<br/>UDS client]
+    TUI --- DAE
+  end
+
+  GH[GitHub · gh CLI<br/>issues · PRs · CI]
+  ARCH <==gh==> GH
+  TP <==gh==> GH
+  COD <==gh==> GH
+
+  classDef daemon fill:#11161f,stroke:#7dd3fc,color:#e5e7eb;
+  classDef arch fill:#11161f,stroke:#a78bfa,color:#e5e7eb;
+  classDef code fill:#11161f,stroke:#fb923c,color:#e5e7eb;
+  classDef rev fill:#11161f,stroke:#34d399,color:#e5e7eb;
+  classDef crt fill:#11161f,stroke:#f472b6,color:#e5e7eb;
+  classDef tui fill:#11161f,stroke:#60a5fa,color:#e5e7eb;
+  classDef ext fill:#0e131c,stroke:#64748b,color:#e5e7eb,stroke-dasharray:4 3;
+  class DAE daemon
+  class ARCH arch
+  class TP code
+  class COD code
+  class REV rev
+  class CRT crt
+  class TUI tui
+  class GH ext
+    </div>
+  </div>
+
+  <div class="section-header"><span class="num">§3</span><h2>Per-task state machine</h2></div>
+  <p class="lede">Inside the task-processor (M4–M6).</p>
+  <div class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> read_task
+  read_task --> plan_actions: task loaded
+  plan_actions --> dispatch_action: tasks.md written
+  dispatch_action --> coding: coder spawned
+  coding --> commit_landed: coder commits
+  commit_landed --> reviewing: spawn reviewers + critics
+  reviewing --> deciding: all results in
+  deciding --> dispatch_action: architect says fix or next action
+  deciding --> coding: fix in place
+  deciding --> task_closed: all sub-actions done
+  task_closed --> closure_critique: spawn 3+3 agents
+  closure_critique --> [*]: median >= threshold
+  closure_critique --> dispatch_action: gap found
+  deciding --> dropped: architect drops
+  dropped --> [*]
+  coding --> stuck: idle
+  stuck --> [*]
+    </div>
+  </div>
+
+  <div class="section-header"><span class="num">§4</span><h2>User control</h2></div>
+  <ul>
+    <li>Settings declare which decisions are automated vs require user.</li>
+    <li>Always require user input when: dramatic plan change, blocker can't be resolved, architector confidence-low, fix-round 3 reached.</li>
+    <li>User-input requests show in TUI top-of-screen alert; user replies via <code>ca user-respond</code>.</li>
+  </ul>
+
+  <div class="section-header"><span class="num">§5</span><h2>Validation discipline</h2></div>
+  <ul>
+    <li>Every accepted task must produce evidence: tests run, screenshots, e2e scenarios, demo recordings.</li>
+    <li>Architector cannot accept until required validators pass with stored artifacts.</li>
+    <li>Artifacts visible in TUI; auditable post-merge.</li>
+  </ul>
+
+  <div class="section-header"><span class="num">§6</span><h2>Roadmap — 9 milestones</h2></div>
+
+  <div class="ms foundation">
+    <div class="id">M0<span class="sub">infra · foundation</span></div>
+    <div>
+      <h3>Foundation</h3>
+      <div class="goal">Archive existing crates to legacy/, new Rust workspace with ca-lib + ca-daemon + ca + ca-tui, CI gates green.</div>
+      <div class="meta"><span><b>5 PRs</b></span><span><b>risk:</b> low</span><span><b>exit:</b> fresh clone → cargo build green; CI runs fmt + clippy + test</span></div>
+    </div>
+  </div>
+
+  <div class="ms foundation">
+    <div class="id">M1<span class="sub">api · foundation</span></div>
+    <div>
+      <h3>Daemon + UDS protocol</h3>
+      <div class="goal">ca-daemon binary, UDS server, versioned JSON-RPC, SQLite state, ca CLI client. Heartbeat + reconnect.</div>
+      <div class="meta"><span><b>4 PRs</b></span><span><b>risk:</b> medium</span><span><b>exit:</b> ca daemon ↔ ca ping works; daemon survives kill -TERM gracefully</span></div>
+    </div>
+  </div>
+
+  <div class="ms core">
+    <div class="id">M2<span class="sub">api · core</span></div>
+    <div>
+      <h3>Architector lifecycle</h3>
+      <div class="goal">Architector = one interactive claude session per (repo, milestone), tmux pane, architector SKILL.md, talks to daemon via ca CLI.</div>
+      <div class="meta"><span><b>5 PRs</b></span><span><b>risk:</b> medium</span><span><b>exit:</b> ca architect register opens working architector; survives daemon restart</span></div>
+    </div>
+  </div>
+
+  <div class="ms core">
+    <div class="id">M3<span class="sub">api · core</span></div>
+    <div>
+      <h3>Breakdown + task model</h3>
+      <div class="goal">Architector invokes breakdown (Rust port) for its issue. Tasks persisted. Critique step verifies tasks lead to milestone goal.</div>
+      <div class="meta"><span><b>4 PRs</b></span><span><b>risk:</b> medium</span><span><b>exit:</b> ca task list shows real breakdown; critique passes 2/2</span></div>
+    </div>
+  </div>
+
+  <div class="ms dispatch">
+    <div class="id">M4<span class="sub">api · dispatch</span></div>
+    <div>
+      <h3>Task-processor + coder dispatch</h3>
+      <div class="goal">ca-task-processor per task. Sub-action planning to tasks.md. Coder in tmux pane with fresh worktree. git push works (gh auth setup-git).</div>
+      <div class="meta"><span><b>5 PRs</b></span><span><b>risk:</b> high</span><span><b>exit:</b> end-to-end task dispatch works; coder is attachable; git push works first try</span></div>
+    </div>
+  </div>
+
+  <div class="ms review">
+    <div class="id">M5<span class="sub">api · review</span></div>
+    <div>
+      <h3>Reviewer + critic fan-out</h3>
+      <div class="goal">3 reviewer + 3-5 critic claude -p subprocesses. Median scoring. Findings posted as PR comment.</div>
+      <div class="meta"><span><b>4 PRs</b></span><span><b>risk:</b> high</span><span><b>exit:</b> 3 reviewers + 5 critics on a real PR; recommendation correct on 3/3 test PRs</span></div>
+    </div>
+  </div>
+
+  <div class="ms review">
+    <div class="id">M6<span class="sub">core · review</span></div>
+    <div>
+      <h3>Architector decision loop</h3>
+      <div class="goal">Drop/accept/fix per coder attempt. Update tasks.md after every decision. Max 3 fix rounds. Closure critique (3+3 agents).</div>
+      <div class="meta"><span><b>5 PRs</b></span><span><b>risk:</b> high</span><span><b>exit:</b> drop+iterate+accept all observed; tasks.md edits reflect decisions; user-input flow works</span></div>
+    </div>
+  </div>
+
+  <div class="ms tui">
+    <div class="id">M7<span class="sub">ui · tui</span></div>
+    <div>
+      <h3>TUI v0</h3>
+      <div class="goal">HTML mocks first, then ratatui. Connects to daemon over UDS. Architectors + tasks + progress + needs-input alerts + log tails.</div>
+      <div class="meta"><span><b>6 PRs</b></span><span><b>risk:</b> medium</span><span><b>exit:</b> TUI shows live data; needs-input flow end-to-end</span></div>
+    </div>
+  </div>
+
+  <div class="ms gate">
+    <div class="id">M8<span class="sub">api · gate</span></div>
+    <div>
+      <h3>Validation gate</h3>
+      <div class="goal">Plugin validators (Playwright, e2e, custom). Architector cannot accept without required artifacts. Artifacts surfaced in TUI.</div>
+      <div class="meta"><span><b>5 PRs</b></span><span><b>risk:</b> medium</span><span><b>exit:</b> a UI-touching task cannot be accepted without ≥1 screenshot</span></div>
+    </div>
+  </div>
+
+  <div class="ms merge">
+    <div class="id">M9<span class="sub">core · merge</span></div>
+    <div>
+      <h3>End-to-end shipping + milestone closure</h3>
+      <div class="goal">Final milestone critique (3-5 critics, median 1-100). Gap-fill. Plan reconciliation: improver/test-builder/revisit.</div>
+      <div class="meta"><span><b>4 PRs</b></span><span><b>risk:</b> medium</span><span><b>exit:</b> first milestone shipped end-to-end through ca_v1 itself</span></div>
+    </div>
+  </div>
+
+  <div class="section-header"><span class="num">§7</span><h2>What's reused from existing skills</h2></div>
+  <table>
+    <thead><tr><th>Skill / file</th><th>Status under ca_v1</th></tr></thead>
+    <tbody>
+      <tr><td>skills/breakdown/SKILL.md + templates</td><td>Reused. Logic ported to Rust in M3.</td></tr>
+      <tr><td>skills/coder/SKILL.md</td><td>Reused as system prompt for coder claude session (M4).</td></tr>
+      <tr><td>skills/reviewer/SKILL.md</td><td>Reused as system prompt for reviewer subprocesses (M5).</td></tr>
+      <tr><td>skills/critic/SKILL.md</td><td>Reused as system prompt for critic subprocesses (M5).</td></tr>
+      <tr><td>skills/improver, skills/test-builder, skills/revisit</td><td>Reused. Architector invokes them post-merge (M9).</td></tr>
+      <tr><td>skills/dispatch/scripts/dispatch.py</td><td>Logic ported to Rust in M4. Python script archived.</td></tr>
+      <tr><td>skills/dispatch/scripts/watcher.py</td><td>Logic ported to Rust in M4–M5 (state machine + review fan-out). Python script archived.</td></tr>
+      <tr><td>skills/pr-babysit/scripts/pr_babysit.py</td><td>Decision logic ported to architector skill + daemon RPCs (M6).</td></tr>
+      <tr><td>skills/suggest/scripts/suggest.py</td><td>Reused as TUI feature in M7. Python script kept for now.</td></tr>
+      <tr><td>v2_design/* (HTML mocks + theme.css + ui-shell.css)</td><td>Reused as styling base for ca_v1's TUI mocks in M7.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-header"><span class="num">§8</span><h2>What's NOT in v1</h2></div>
+  <ul>
+    <li>Web admin (that's the next plan: v2_design)</li>
+    <li>Remote machine bridges (ca_v1 is single-machine; protocol is designed remote-ready)</li>
+    <li>Multi-user (single-user assumption)</li>
+    <li>Plugin marketplace, mobile UI, complex permission models</li>
+    <li>Auto-merge after CI green (user clicks ✓ on merge for v1; auto-merge can come later)</li>
+  </ul>
+
+  <p style="margin-top:36px; padding-top:14px; border-top:1px solid var(--border); color:var(--text-faint); font-size:12px; font-family:var(--mono);">
+    last updated 2026-05-03 · plan codename: <code>ca_v1</code> · <a href="milestones.json">milestones.json</a> · <a href="../v2_design/00-final-plan.html">v2_design (future phase)</a>
+  </p>
+</main>
+</body>
+</html>

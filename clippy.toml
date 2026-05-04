@@ -1,0 +1,7 @@
+# Clippy thresholds for the claude_admin workspace.
+# Most lints are controlled via cargo lint-strict (alias in .cargo/config.toml)
+# which passes `-D warnings`. These constants tune the few thresholds that
+# benefit from being slightly different than upstream defaults.
+cognitive-complexity-threshold = 30
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250

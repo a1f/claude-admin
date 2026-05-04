@@ -1,0 +1,21 @@
+{
+  "$schema_version": 1,
+  "$comment": "Template registry. install.sh substitutes __HOME__ with $HOME. Edit paths to match your local checkout. Add new plans under 'plans'.",
+  "plans": {
+    "v2_design": {
+      "title": "claude_admin v2 — self-hosted web admin orchestrator",
+      "milestones_source": "__HOME__/dev/claude_admin/v2_design/milestones.json",
+      "plan_doc": "__HOME__/dev/claude_admin/v2_design/00-final-plan.html",
+      "plan_dir": "__HOME__/dev/claude_admin/v2_design",
+      "repo_local_path": "__HOME__/dev/claude_admin",
+      "gh_repo": "a1f/claude-admin",
+      "default_base": "main",
+      "stack": {
+        "backend": "Rust + axum + sqlx",
+        "frontend": "React + Vite + Tailwind + TanStack Query",
+        "db": "Postgres",
+        "agent_runtime": "claude CLI (subprocess for headless, tmux for coder)"
+      }
+    }
+  }
+}

@@ -41,6 +41,17 @@
         "total_loc_estimate": 400,
         "task_ids": ["M0-T1", "M0-T2", "M0-T3", "M0-T4", "M0-T5"],
         "created_at": "2026-05-03"
+      },
+      "dispatches": {
+        "M0-T1": {
+          "manual": true,
+          "branch": "M0-T1",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/4",
+          "started_at": "2026-05-03",
+          "merged_at": "2026-05-03",
+          "phase": "merged",
+          "note": "manual dispatch — orchestrator not yet built; M0-T1 is the bootstrap"
+        }
       }
     },
     {

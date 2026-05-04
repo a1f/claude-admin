@@ -4,3 +4,9 @@ fmt-fix = "fmt --all"
 lint = "clippy --workspace --all-targets --all-features"
 lint-fix = "clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged"
 lint-strict = "clippy --workspace --all-targets --all-features -- -D warnings"
+
+# `cc` may be intercepted on developer machines (e.g. by a personal wrapper
+# script in ~/bin). Tell rustc to call `clang` directly so linking is
+# robust regardless of what's first on PATH.
+[target.'cfg(target_os = "macos")']
+linker = "clang"

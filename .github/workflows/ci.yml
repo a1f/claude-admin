@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Each gate is its own job so failures are independent and parallel.
+# CI runs on ubuntu-latest; the `cc` linker override in .cargo/config.toml is
+# scoped to macOS and is a no-op here (Ubuntu has a working `cc`).
+
+jobs:
+  fmt-check:
+    name: fmt-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      - name: cargo fmt-check
+        run: cargo fmt-check
+
+  lint-strict:
+    name: lint-strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      - name: cargo lint-strict
+        run: cargo lint-strict
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: cargo test --workspace --all-targets
+        run: cargo test --workspace --all-targets

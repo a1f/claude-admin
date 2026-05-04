@@ -32,7 +32,8 @@
       "exit_criteria": "fresh clone → cargo build --workspace green; CI runs fmt + clippy + test",
       "risk": "low",
       "depends_on": [],
-      "status": "broken_down",
+      "status": "shipped",
+      "shipped_at": "2026-05-04",
       "reuses": "(cleanup of old crates)",
       "breakdown": {
         "issue_url": "https://github.com/a1f/claude-admin/issues/3",
@@ -66,7 +67,8 @@
           "branch": "M0-T3",
           "pr_url": "https://github.com/a1f/claude-admin/pull/6",
           "started_at": "2026-05-04",
-          "phase": "drafted",
+          "merged_at": "2026-05-04",
+          "phase": "merged",
           "note": "parallel with T4 + T5 (all branched from main after T2 merged)"
         },
         "M0-T4": {
@@ -74,7 +76,8 @@
           "branch": "M0-T4",
           "pr_url": "https://github.com/a1f/claude-admin/pull/7",
           "started_at": "2026-05-04",
-          "phase": "drafted",
+          "merged_at": "2026-05-04",
+          "phase": "merged",
           "note": "parallel with T3 + T5"
         },
         "M0-T5": {
@@ -82,7 +85,8 @@
           "branch": "M0-T5",
           "pr_url": "https://github.com/a1f/claude-admin/pull/8",
           "started_at": "2026-05-04",
-          "phase": "drafted",
+          "merged_at": "2026-05-04",
+          "phase": "merged",
           "note": "parallel with T3 + T4"
         }
       }

@@ -1,0 +1,16 @@
+[package]
+name = "ca-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "ratatui client for the local ca-daemon"
+
+[[bin]]
+name = "ca-tui"
+path = "src/main.rs"
+
+[dependencies]
+ca-lib.workspace = true

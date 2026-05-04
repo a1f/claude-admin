@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ca-lib",
+    "crates/ca-daemon",
+    "crates/ca",
+    "crates/ca-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Alex Fetisov"]
+repository = "https://github.com/a1f/claude-admin"
+rust-version = "1.85"
+
+# Shared dependencies. Crates opt in by writing `<dep>.workspace = true` in
+# their own [dependencies]. New milestones add to this list as needed.
+[workspace.dependencies]
+ca-lib = { path = "crates/ca-lib" }
+
+# Reserved here so all crates pin the same versions. Crates depending on
+# them flip them on individually.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "time"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

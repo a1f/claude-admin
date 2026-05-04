@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use uuid::Uuid;
 
-const CONTENT_CAPTURE_LINES: u32 = 20;
+const CONTENT_CAPTURE_LINES: u32 = 50;
 
 #[derive(Error, Debug)]
 pub enum DiscoveryError {

@@ -1,14 +1,5 @@
-use crate::app::{App, InputMode, ViewMode};
-use crate::command_palette::CommandPalette;
-use crate::doc_view;
-use crate::form::FormOverlay;
-use crate::git_view;
-use crate::plan_view;
-use crate::project_view;
-use crate::resource_view;
-use crate::review_view;
+use crate::app::{App, InputMode};
 use ca_lib::models::{Session, SessionState};
-use ca_lib::project::Project;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -27,80 +18,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let main_area = chunks[0];
     let bar_area = chunks[1];
 
-    match app.view_mode {
-        ViewMode::Sessions => draw_sessions(frame, app, main_area),
-        ViewMode::Projects => plan_view::draw_projects(frame, app, main_area),
-        ViewMode::Plans => plan_view::draw_plans(frame, app, main_area),
-        ViewMode::PlanDetail => plan_view::draw_plan_detail(frame, app, main_area),
-        ViewMode::Orchestrator => project_view::draw_orchestrator(frame, app, main_area),
-        ViewMode::Review => review_view::draw_review(frame, app, main_area),
-        ViewMode::Git => git_view::draw_git(frame, app, main_area),
-        ViewMode::Resources => resource_view::draw_resources(frame, app, main_area),
-        ViewMode::Document => doc_view::draw_document(frame, app, main_area),
-        ViewMode::PlanHistory => plan_view::draw_plan_history(frame, app, main_area),
-    }
-
-    if app.input_mode == InputMode::Command {
-        draw_command_bar(frame, app, bar_area);
-        if !app.command_palette.suggestions.is_empty() {
-            draw_suggestions(frame, &app.command_palette, bar_area);
-        }
-    } else {
-        draw_status_bar(frame, app, bar_area);
-    }
-
-    if let Some(form) = &app.form_overlay {
-        if app.input_mode == InputMode::Form {
-            draw_form_overlay(frame, form, area);
-        }
-    }
+    draw_session_list(frame, app, main_area);
+    draw_status_bar(frame, app, bar_area);
 
     if app.input_mode == InputMode::Help {
-        draw_help_overlay(frame, app, area);
-    }
-}
-
-fn draw_sessions(frame: &mut Frame, app: &App, area: Rect) {
-    let visible = app.visible_sessions();
-    if visible.is_empty() {
-        let msg = if app.show_untracked {
-            "No untracked sessions. Press 'i' to show all."
-        } else if app.connected {
-            "No sessions found. Waiting for data..."
-        } else {
-            "Not connected to daemon. Is it running? (claude-admin daemon start)"
-        };
-        let block = Paragraph::new(msg).block(
-            Block::default()
-                .title(" claude-admin ")
-                .borders(Borders::ALL),
-        );
-        frame.render_widget(block, area);
-        return;
-    }
-
-    let in_reply = app.input_mode == InputMode::SessionReply;
-    let main_area = if in_reply {
-        let vert = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
-            .split(area);
-        draw_reply_bar(frame, app, vert[1]);
-        vert[0]
-    } else {
-        area
-    };
-
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
-        .split(main_area);
-
-    draw_session_list(frame, app, chunks[0]);
-    draw_preview(frame, app, chunks[1]);
-
-    if let Some(projects) = &app.project_picker {
-        draw_project_picker(frame, projects, app.picker_index, area);
+        draw_help_overlay(frame, area);
     }
 }
 
@@ -139,15 +61,29 @@ fn session_row_style(state: &SessionState, blink: bool) -> (Style, Style, Style)
 
 fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     let visible = app.visible_sessions();
+    if visible.is_empty() {
+        let msg = if app.show_untracked {
+            "No untracked sessions. Ctrl-I to show all."
+        } else if app.connected {
+            "No sessions found. Waiting for data..."
+        } else {
+            "Not connected to daemon. Is it running? (claude-admin daemon start)"
+        };
+        let block = Paragraph::new(msg).block(
+            Block::default()
+                .title(" claude-admin ")
+                .borders(Borders::ALL),
+        );
+        frame.render_widget(block, area);
+        return;
+    }
+
     let blink = app.blink_on();
     let groups = app.grouped_sessions();
-
-    // Build items with group headers; track which list index maps to selected_index
     let mut items: Vec<ListItem> = Vec::new();
     let mut highlight_index: Option<usize> = None;
 
     for (group_name, session_indices) in &groups {
-        // Group header (non-selectable visual separator)
         let header = ListItem::new(Line::from(Span::styled(
             format!("── {group_name} ──"),
             Style::default()
@@ -189,9 +125,9 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = if app.show_untracked {
-        " Sessions [untracked] (Y:yes y:always n:no t:reply ?:help) "
+        " Sessions [untracked] "
     } else {
-        " Sessions (Y:yes y:always n:no t:reply p:projects ?:help) "
+        " claude-admin "
     };
 
     let list = List::new(items)
@@ -203,82 +139,6 @@ fn draw_session_list(frame: &mut Frame, app: &App, area: Rect) {
     list_state.select(highlight_index);
 
     frame.render_stateful_widget(list, area, &mut list_state);
-}
-
-fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
-    let Some(session) = app.selected_session() else {
-        let empty = Paragraph::new("No session selected.")
-            .block(Block::default().title(" Preview ").borders(Borders::ALL));
-        frame.render_widget(empty, area);
-        return;
-    };
-
-    let pin_indicator = if app.pane_preview_pinned {
-        "LIVE"
-    } else {
-        "PAUSED"
-    };
-    let scroll_hint = format!(" Pane [{pin_indicator}] (K:up J:down Y:yes y:always n:no t:reply) ");
-
-    let block = Block::default().title(scroll_hint).borders(Borders::ALL);
-    let inner_height = block.inner(area).height as usize;
-
-    let bold = Style::default().add_modifier(Modifier::BOLD);
-    let header = Line::from(vec![
-        Span::styled(session_display_name(session), bold),
-        Span::raw("  "),
-        Span::styled(
-            session.state.as_str(),
-            Style::default().fg(state_color(&session.state)),
-        ),
-        Span::raw("  "),
-        Span::styled(&session.pane_id, Style::default().fg(Color::DarkGray)),
-    ]);
-
-    // Header (name + state) + blank separator
-    let mut lines = vec![header, Line::from("")];
-
-    if app.pane_preview_lines.is_empty() {
-        lines.push(Line::from("Loading pane content..."));
-    } else {
-        use ansi_to_tui::IntoText;
-        for raw_line in &app.pane_preview_lines {
-            if let Ok(text) = raw_line.as_bytes().into_text() {
-                lines.extend(text.lines);
-            } else {
-                lines.push(Line::from(raw_line.as_str()));
-            }
-        }
-    }
-
-    // When pinned and content is shorter than viewport, pad top to
-    // push content to the bottom of the pane.
-    let scroll = if app.pane_preview_pinned && lines.len() < inner_height {
-        0_u16
-    } else {
-        app.pane_preview_scroll
-    };
-
-    // Insert padding so short content sits at the bottom
-    if app.pane_preview_pinned && lines.len() < inner_height {
-        let padding = inner_height - lines.len();
-        lines.splice(2..2, (0..padding).map(|_| Line::from("")));
-    }
-
-    let preview = Paragraph::new(lines).block(block).scroll((scroll, 0));
-
-    frame.render_widget(preview, area);
-}
-
-fn draw_reply_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let display = format!("Reply> {}", app.session_reply_input);
-    let bar = Paragraph::new(display).block(
-        Block::default()
-            .title(" Reply to session (Enter:send Esc:cancel) ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow)),
-    );
-    frame.render_widget(bar, area);
 }
 
 fn session_display_name(session: &Session) -> String {
@@ -302,15 +162,6 @@ fn state_indicator(state: &SessionState) -> &'static str {
         SessionState::NeedsInput => "! ",
         SessionState::Done => "- ",
         SessionState::Idle => "  ",
-    }
-}
-
-fn state_color(state: &SessionState) -> Color {
-    match state {
-        SessionState::Working => Color::Green,
-        SessionState::NeedsInput => Color::Yellow,
-        SessionState::Done => Color::DarkGray,
-        SessionState::Idle => Color::White,
     }
 }
 
@@ -349,28 +200,13 @@ fn build_state_counts(app: &App) -> Vec<Span<'_>> {
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let right_msg = if let Some(msg) = &app.command_palette.message {
-        msg.clone()
-    } else if let Some((msg, _)) = &app.status_message {
+    let right_msg = if let Some((msg, _)) = &app.status_message {
         msg.clone()
     } else {
         String::new()
     };
 
-    let left_hints = match app.view_mode {
-        ViewMode::Sessions => "Enter/a:attach t:reply n:next-input p:projects ?:help",
-        ViewMode::Projects => "n:new d:del b:back ?:help",
-        ViewMode::Plans => "n:new d:del b:back ?:help",
-        ViewMode::PlanDetail => "s:status o:orch b:back ?:help",
-        ViewMode::Orchestrator => "Tab:panel s:spawn a:attach b:back ?:help",
-        ViewMode::Review => "j/k:scroll n/p:hunk h/l:file c:comment b:back ?:help",
-        ViewMode::Git => "j/k:commits Enter:diff n/p:scroll h/l:file b:back ?:help",
-        ViewMode::Resources => "j/k:navigate t:time-filter s:sort b:back ?:help",
-        ViewMode::Document => {
-            "j/k:scroll c:comment n/p:nav-comments r:resolve S:send b:back ?:help"
-        }
-        ViewMode::PlanHistory => "j/k:navigate r:restore b:back ?:help",
-    };
+    let left_hints = "j/k:nav 1-9:select Enter:attach ^I:filter ?:help q:quit";
 
     let left = Span::styled(
         format!(" {left_hints}"),
@@ -406,175 +242,21 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
-fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let display = format!(":{}", app.command_palette.input.value());
-    let bar = Paragraph::new(display).style(Style::default().fg(Color::White).bg(Color::DarkGray));
-    frame.render_widget(bar, area);
-}
-
-fn draw_suggestions(frame: &mut Frame, palette: &CommandPalette, bar_area: Rect) {
-    let count = palette.suggestions.len().min(8) as u16;
-    if count == 0 || bar_area.y < count {
-        return;
-    }
-
-    let popup_area = Rect::new(
-        bar_area.x,
-        bar_area.y.saturating_sub(count),
-        bar_area.width.min(40),
-        count,
-    );
-
-    frame.render_widget(Clear, popup_area);
-
-    let items: Vec<ListItem> = palette
-        .suggestions
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let style = if i == palette.selected_suggestion {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            ListItem::new(s.as_str()).style(style)
-        })
-        .collect();
-
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::NONE)
-            .style(Style::default().bg(Color::Black)),
-    );
-    frame.render_widget(list, popup_area);
-}
-
-fn draw_form_overlay(frame: &mut Frame, form: &FormOverlay, area: Rect) {
-    let width = area.width * 60 / 100;
-    let height = area.height * 50 / 100;
-    let x = area.x + (area.width - width) / 2;
-    let y = area.y + (area.height - height) / 2;
-    let overlay_area = Rect::new(x, y, width, height);
-
-    frame.render_widget(Clear, overlay_area);
-
-    let block = Block::default()
-        .title(format!(" {} ", form.title))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-    let inner = block.inner(overlay_area);
-    frame.render_widget(block, overlay_area);
-
-    let field_count = form.fields.len();
-    let mut constraints: Vec<Constraint> = Vec::new();
-    for _ in 0..field_count {
-        constraints.push(Constraint::Length(2));
-    }
-    if form.error_message.is_some() {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.push(Constraint::Min(0));
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints(constraints)
-        .split(inner);
-
-    for (i, field) in form.fields.iter().enumerate() {
-        let is_focused = i == form.focused_field;
-        draw_form_field(frame, field, is_focused, chunks[i]);
-    }
-
-    if let Some(err) = &form.error_message {
-        let err_idx = field_count;
-        if err_idx < chunks.len() {
-            let err_widget = Paragraph::new(err.as_str()).style(Style::default().fg(Color::Red));
-            frame.render_widget(err_widget, chunks[err_idx]);
-        }
-    }
-}
-
-fn draw_form_field(
-    frame: &mut Frame,
-    field: &crate::form::FormField,
-    is_focused: bool,
-    area: Rect,
-) {
-    if area.height < 2 {
-        return;
-    }
-
-    let label_style = if is_focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::Gray)
-    };
-
-    let required_marker = if field.required { " *" } else { "" };
-    let label = format!("{}{}", field.input.label(), required_marker);
-
-    let input_style = if is_focused {
-        Style::default().fg(Color::White)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let field_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
-        .split(area);
-
-    let label_widget = Paragraph::new(label).style(label_style);
-    frame.render_widget(label_widget, field_chunks[0]);
-
-    let border_style = if is_focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let display = field.input.value().to_string();
-    let input_widget = Paragraph::new(display).style(input_style).block(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(border_style),
-    );
-    frame.render_widget(input_widget, field_chunks[1]);
-}
-
-fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_help_overlay(frame: &mut Frame, area: Rect) {
     use crate::help::help_content;
 
-    let entries = help_content(app.view_mode);
+    let entries = help_content();
 
     let width = area.width * 70 / 100;
-    let height = area.height * 80 / 100;
+    let height = area.height * 60 / 100;
     let x = area.x + (area.width - width) / 2;
     let y = area.y + (area.height - height) / 2;
     let overlay_area = Rect::new(x, y, width, height);
 
     frame.render_widget(Clear, overlay_area);
 
-    let view_name = match app.view_mode {
-        ViewMode::Sessions => "Sessions",
-        ViewMode::Projects => "Projects",
-        ViewMode::Plans => "Plans",
-        ViewMode::PlanDetail => "Plan Detail",
-        ViewMode::Orchestrator => "Orchestrator",
-        ViewMode::Review => "Review",
-        ViewMode::Git => "Git",
-        ViewMode::Resources => "Resources",
-        ViewMode::Document => "Document",
-        ViewMode::PlanHistory => "Plan History",
-    };
-
     let block = Block::default()
-        .title(format!(" Help \u{2014} {view_name} (? or Esc to close) "))
+        .title(" Help (? or Esc to close) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(overlay_area);
@@ -591,63 +273,21 @@ fn draw_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD)
                 .fg(Color::Cyan),
         ),
-        Cell::from("CLI Command").style(
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(Color::Cyan),
-        ),
     ]);
 
     let rows: Vec<Row> = entries
         .iter()
-        .map(|(key_str, action, cli)| {
+        .map(|(key_str, action)| {
             Row::new(vec![
                 Cell::from(*key_str).style(Style::default().fg(Color::Yellow)),
                 Cell::from(*action),
-                Cell::from(*cli).style(Style::default().fg(Color::DarkGray)),
             ])
         })
         .collect();
 
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(12),
-            Constraint::Min(20),
-            Constraint::Min(30),
-        ],
-    )
-    .header(header)
-    .row_highlight_style(Style::default());
+    let table = Table::new(rows, [Constraint::Length(12), Constraint::Min(20)])
+        .header(header)
+        .row_highlight_style(Style::default());
 
     frame.render_widget(table, inner);
-}
-
-fn draw_project_picker(frame: &mut Frame, projects: &[Project], selected: usize, area: Rect) {
-    let height = (projects.len() as u16 + 2).min(12);
-    let width = 40u16.min(area.width);
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    let popup = Rect::new(x, y, width, height);
-
-    frame.render_widget(Clear, popup);
-
-    let items: Vec<ListItem> = projects
-        .iter()
-        .map(|p| ListItem::new(p.name.as_str()))
-        .collect();
-
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(" Assign to Project (Enter/Esc) ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-        .highlight_symbol(">> ");
-
-    let mut list_state = ListState::default();
-    list_state.select(Some(selected));
-    frame.render_stateful_widget(list, popup, &mut list_state);
 }

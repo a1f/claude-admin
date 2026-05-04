@@ -2,7 +2,7 @@ use crate::models::SessionState;
 
 /// Priority: Done > ActiveSpinner > NeedsInput > Working > Idle
 pub fn detect_state(content: &str) -> SessionState {
-    let recent_lines: Vec<&str> = content.lines().rev().take(20).collect();
+    let recent_lines: Vec<&str> = content.lines().rev().take(40).collect();
     let recent_content = recent_lines
         .iter()
         .rev()
@@ -51,6 +51,7 @@ fn is_done(content: &str) -> bool {
 
 fn is_working(content: &str) -> bool {
     let working_patterns = [
+        // Legacy/generic patterns
         "Tool:",
         "Reading",
         "Writing",
@@ -59,6 +60,19 @@ fn is_working(content: &str) -> bool {
         "Analyzing",
         "Thinking",
         "Processing",
+        // Claude Code modern UI patterns
+        "Contemplating",
+        "Reasoning",
+        "Cooked for",
+        "\u{25cf} Read",   // ● Read
+        "\u{25cf} Edit",   // ● Edit
+        "\u{25cf} Write",  // ● Write
+        "\u{25cf} Bash",   // ● Bash
+        "\u{25cf} Grep",   // ● Grep
+        "\u{25cf} Glob",   // ● Glob
+        "\u{25cf} Agent",  // ● Agent
+        "\u{25cf} Skill",  // ● Skill
+        "\u{25cf} Update", // ● Update
     ];
     working_patterns.iter().any(|p| content.contains(p))
 }
@@ -290,6 +304,30 @@ mod tests {
     fn test_claude_permission_prompt_detected() {
         let content = "Bash command\n\n  ls /some/path 2>/dev/null\n  Check if prompts are installed\n\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, allow reading from lib/\n  3. No\n\nEsc to cancel · Tab to amend · ctrl+e to explain";
         assert_eq!(detect_state(content), SessionState::NeedsInput);
+    }
+
+    #[test]
+    fn test_detect_working_contemplating() {
+        let content = "Some output\n\n* Contemplating...\n";
+        assert_eq!(detect_state(content), SessionState::Working);
+    }
+
+    #[test]
+    fn test_detect_working_bullet_tool() {
+        let content = "Let me check that.\n\n● Read 1 file (ctrl+o to expand)\n  └  some output";
+        assert_eq!(detect_state(content), SessionState::Working);
+    }
+
+    #[test]
+    fn test_detect_working_bullet_bash() {
+        let content = "● Bash(cargo test 2>&1)\n  └  test result: ok. 10 passed";
+        assert_eq!(detect_state(content), SessionState::Working);
+    }
+
+    #[test]
+    fn test_detect_working_cooked_for() {
+        let content = "Some output\n* Cooked for 2m 30s\n* Contemplating...";
+        assert_eq!(detect_state(content), SessionState::Working);
     }
 
     #[test]

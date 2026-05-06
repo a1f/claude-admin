@@ -10,3 +10,9 @@ lint-strict = "clippy --workspace --all-targets --all-features -- -D warnings"
 # robust regardless of what's first on PATH.
 [target.'cfg(target_os = "macos")']
 linker = "clang"
+
+# Same reason: native build scripts (cc-rs, used by libsqlite3-sys) need a
+# real C compiler. Pin to clang globally — both macOS and Ubuntu CI have it.
+[env]
+CC = "clang"
+CXX = "clang++"

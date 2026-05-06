@@ -14,3 +14,20 @@ path = "src/main.rs"
 
 [dependencies]
 ca-lib.workspace = true
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "signal",
+    "io-util",
+    "time",
+    "sync",
+] }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+libc = "0.2"
+tokio = { workspace = true, features = ["process"] }

@@ -107,8 +107,16 @@
       "exit_criteria": "ca daemon starts; ca ping from another shell returns daemon version; daemon survives kill -TERM gracefully (drains in-flight requests)",
       "risk": "medium",
       "depends_on": ["M0"],
-      "status": "planned",
-      "reuses": "concepts from old `daemon` crate (pid file, socket pattern)"
+      "status": "broken_down",
+      "reuses": "concepts from old `daemon` crate (pid file, socket pattern)",
+      "breakdown": {
+        "issue_url": "https://github.com/a1f/claude-admin/issues/9",
+        "local_file": "/Users/alf/dev/claude_admin/v1_orchestrator/breakdowns/M1.md",
+        "task_count": 4,
+        "total_loc_estimate": 650,
+        "task_ids": ["M1-T1", "M1-T2", "M1-T3", "M1-T4"],
+        "created_at": "2026-05-05"
+      }
     },
     {
       "id": "M2",

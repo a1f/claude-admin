@@ -43,6 +43,8 @@ dependencies = [
  "anyhow",
  "ca-lib",
  "libc",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",

@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use tracing_subscriber::EnvFilter;
 
+mod rpc;
 mod socket;
 
 /// Resolve the socket path from the `CA_SOCKET_PATH` env var (test override)

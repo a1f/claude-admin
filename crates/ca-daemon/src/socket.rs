@@ -1,7 +1,7 @@
 //! Daemon socket lifecycle: bind, accept, drain, cleanup.
 //!
-//! M1-T1 implements just enough to listen, log accepts, write a placeholder
-//! banner, and clean up on signal. Real RPC framing arrives in M1-T2.
+//! Per-connection RPC dispatch lives in [`crate::rpc`]. This module owns
+//! the listener, the signal-driven shutdown, and socket-file cleanup.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -9,23 +9,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use tokio::io::AsyncWriteExt;
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::UnixListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
-use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
+
+use crate::rpc::{self, AppState};
 
 /// Maximum time to wait for in-flight handlers during shutdown before
 /// abandoning them.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// One-line greeting written to every connection until M1-T2 replaces it
-/// with structured RPC framing.
-fn banner() -> String {
-    format!("ca-daemon {} proto=1\n", ca_lib::version())
-}
 
 /// Bind the UDS at `path`, accept connections, drain on SIGTERM/SIGINT,
 /// remove the socket file on exit.
@@ -50,7 +44,8 @@ pub async fn serve(path: PathBuf) -> Result<()> {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
         .with_context(|| format!("setting permissions on {}", path.display()))?;
 
-    let started_at = Instant::now();
+    let started_at = std::time::Instant::now();
+    let state = Arc::new(AppState { started_at });
     info!(socket = %path.display(), version = ca_lib::version(), "ca-daemon listening");
 
     let shutdown = Arc::new(Notify::new());
@@ -68,7 +63,7 @@ pub async fn serve(path: PathBuf) -> Result<()> {
             accept = listener.accept() => match accept {
                 Ok((stream, _)) => {
                     debug!("connection accepted");
-                    conns.spawn(handle_connection(stream));
+                    conns.spawn(rpc::handle_connection(stream, state.clone()));
                 }
                 Err(e) => warn!(error = %e, "accept error"),
             },
@@ -88,11 +83,9 @@ pub async fn serve(path: PathBuf) -> Result<()> {
     if drain_outcome.is_err() {
         warn!(remaining = conns.len(), "drain timeout; aborting handlers");
         conns.abort_all();
-        // best-effort: collect aborted joins so they don't leak
         while conns.join_next().await.is_some() {}
     }
 
-    // Cleanup the socket file.
     match std::fs::remove_file(&path) {
         Ok(()) => info!(socket = %path.display(), "socket removed"),
         Err(e) => warn!(error = %e, socket = %path.display(), "could not remove socket file"),
@@ -103,16 +96,6 @@ pub async fn serve(path: PathBuf) -> Result<()> {
         "ca-daemon stopped"
     );
     Ok(())
-}
-
-async fn handle_connection(mut stream: UnixStream) {
-    if let Err(e) = stream.write_all(banner().as_bytes()).await {
-        debug!(error = %e, "writing banner failed");
-        return;
-    }
-    if let Err(e) = stream.shutdown().await {
-        debug!(error = %e, "shutting down stream failed");
-    }
 }
 
 fn spawn_signal_listener(shutdown: Arc<Notify>) {
@@ -137,17 +120,4 @@ fn spawn_signal_listener(shutdown: Arc<Notify>) {
         }
         shutdown.notify_waiters();
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn banner_contains_version_and_proto() {
-        let b = banner();
-        assert!(b.contains(ca_lib::version()), "banner: {b:?}");
-        assert!(b.contains("proto=1"), "banner: {b:?}");
-        assert!(b.ends_with('\n'), "banner should end with newline");
-    }
 }

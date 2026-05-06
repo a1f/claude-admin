@@ -123,7 +123,8 @@
           "branch": "M1-T1",
           "pr_url": "https://github.com/a1f/claude-admin/pull/10",
           "started_at": "2026-05-05",
-          "phase": "drafted"
+          "merged_at": "2026-05-05",
+          "phase": "merged"
         }
       }
     },

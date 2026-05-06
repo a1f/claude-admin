@@ -116,6 +116,15 @@
         "total_loc_estimate": 650,
         "task_ids": ["M1-T1", "M1-T2", "M1-T3", "M1-T4"],
         "created_at": "2026-05-05"
+      },
+      "dispatches": {
+        "M1-T1": {
+          "manual": true,
+          "branch": "M1-T1",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/10",
+          "started_at": "2026-05-05",
+          "phase": "drafted"
+        }
       }
     },
     {

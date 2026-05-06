@@ -125,6 +125,22 @@
           "started_at": "2026-05-05",
           "merged_at": "2026-05-05",
           "phase": "merged"
+        },
+        "M1-T2": {
+          "manual": true,
+          "branch": "M1-T2",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/11",
+          "started_at": "2026-05-05",
+          "phase": "drafted",
+          "note": "parallel with M1-T3 (disjoint files)"
+        },
+        "M1-T3": {
+          "manual": true,
+          "branch": "M1-T3",
+          "pr_url": "https://github.com/a1f/claude-admin/pull/12",
+          "started_at": "2026-05-05",
+          "phase": "drafted",
+          "note": "parallel with M1-T2 (disjoint files)"
         }
       }
     },

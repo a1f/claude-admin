@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: "Internal skill loaded by the watcher when fanning out PR reviews. Defines the reviewer agent's role, kind-aware focus (security/bugs/quality), and strict JSON output schema. Not invoked directly — the watcher reads this file and applies it via --append-system-prompt for each reviewer subprocess. If a user asks 'what does the reviewer agent do?', this is the source."
+description: "Internal skill loaded by the watcher when fanning out PR reviews. Defines the reviewer agent's role, kind-aware focus (security/bugs/quality), and strict JSON output schema. Not invoked directly -- the watcher reads this file and applies it via --append-system-prompt for each reviewer subprocess. If a user asks 'what does the reviewer agent do?', this is the source."
 ---
 
 # Reviewer

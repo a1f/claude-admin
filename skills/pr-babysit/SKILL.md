@@ -1,6 +1,6 @@
 ---
 name: pr-babysit
-description: "User-facing skill for the post-review decision on a dispatched task. Shows the aggregated review summary (reviewers + critics + recommendation) and lets the user act: ready (promote draft → ready), merge (after CI green), drop (close PR), or wait. Use when the user asks to act on a reviewed PR, approve/reject a PR, merge a task, drop a task, or invokes /pr-babysit. Examples: '/pr-babysit v2_design M0a-T1', '/pr-babysit v2_design M0a-T1 ready', 'merge M0a-T1', 'drop M0a-T1'."
+description: "User-facing skill for the post-review decision on a dispatched task. Shows the aggregated review summary (reviewers + critics + recommendation) and lets the user act: ready (promote draft -> ready), merge (after CI green), drop (close PR), or wait. Use when the user asks to act on a reviewed PR, approve/reject a PR, merge a task, drop a task, or invokes /pr-babysit. Examples: '/pr-babysit v2_design M0a-T1', '/pr-babysit v2_design M0a-T1 ready', 'merge M0a-T1', 'drop M0a-T1'."
 argument-hint: "<plan-codename> <task-id> [show|ready|merge|drop|iterate]"
 ---
 
@@ -15,7 +15,7 @@ Pick up a reviewed PR, show the user the aggregated review summary, and execute 
 Actions:
 
 - `show` — print the review summary; no side effects (default if `<action>` omitted, then this skill becomes interactive)
-- `ready` — promote draft → ready (gh pr ready); state.phase = `accepted_pending_ci`
+- `ready` — promote draft -> ready (gh pr ready); state.phase = `accepted_pending_ci`
 - `merge` — `gh pr merge --squash --delete-branch`; state.phase = `merged`. gh refuses if CI not green.
 - `drop` — `gh pr close`; state.phase = `dropped`. Optionally adds a closing comment.
 - `iterate` — _v1 placeholder_. Posts the feedback bundle as a PR comment + tells the user to manually re-dispatch with `--force`. Full automated iterate lands later.

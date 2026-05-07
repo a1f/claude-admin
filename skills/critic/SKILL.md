@@ -1,6 +1,6 @@
 ---
 name: critic
-description: "Internal skill loaded by the watcher when fanning out PR critiques. Defines the critic agent: adversarial scoring of whether a PR actually achieves its task. Five independent critic instances run in parallel, each scoring 1-100 with axes. Not invoked directly — the watcher reads this file and applies it via --append-system-prompt for each critic subprocess."
+description: "Internal skill loaded by the watcher when fanning out PR critiques. Defines the critic agent: adversarial scoring of whether a PR actually achieves its task. Five independent critic instances run in parallel, each scoring 1-100 with axes. Not invoked directly -- the watcher reads this file and applies it via --append-system-prompt for each critic subprocess."
 ---
 
 # Critic

@@ -131,16 +131,19 @@
           "branch": "M1-T2",
           "pr_url": "https://github.com/a1f/claude-admin/pull/11",
           "started_at": "2026-05-05",
-          "phase": "drafted",
-          "note": "parallel with M1-T3 (disjoint files)"
+          "merged_at": "2026-05-07",
+          "phase": "merged"
         },
         "M1-T3": {
           "manual": true,
           "branch": "M1-T3",
           "pr_url": "https://github.com/a1f/claude-admin/pull/12",
           "started_at": "2026-05-05",
-          "phase": "drafted",
-          "note": "parallel with M1-T2 (disjoint files)"
+          "closed_at": "2026-05-07",
+          "phase": "dropped",
+          "drop_reason": "merge conflicts with main after M1-T2 landed (Cargo.lock + Cargo.toml + main.rs); needs auto-rebase or manual fix",
+          "needs_redispatch": true,
+          "note": "branch M1-T3 retained on remote; work to recover when pr-babysit auto-fixer lands"
         }
       }
     },

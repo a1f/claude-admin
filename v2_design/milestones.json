@@ -327,11 +327,11 @@
       "title": "Reviewers",
       "phase": "review",
       "kind": "api",
-      "goal": "When a PlannedPR enters 'drafted', auto-run reviewers via claude -p subprocess. Findings stored, exposed via API. No critic / architect logic yet.",
+      "goal": "When a PlannedPR enters 'drafted', server enqueues a reviewer job. Daemon spawns one tmux pane per reviewer in the task's window via SessionManager; each pane runs 'claude -p ... | tee log.jsonl'. Daemon streams the log to the server; findings stored, exposed via API. No critic / architect logic yet.",
       "pr_count_target": 4,
       "raw_prs": [
-        "Job queue (Postgres-backed)",
-        "Reviewer worker + claude -p wrapper + structured-JSON output parsing",
+        "Job queue (Postgres-backed) + WSS spawn protocol (server -> daemon: open pane with prompt + skill, stream output back)",
+        "Daemon reviewer worker: SessionManager.spawn_pane(); tee output capture; structured-JSON parsing",
         "Prompt templates per kind: security / bugs / quality / custom",
         "Findings storage + REST endpoints; quota usage tracked per call"
       ],
@@ -368,7 +368,7 @@
       "pr_count_target": 5,
       "raw_prs": [
         "Critic worker + adversarial prompt templates per kind",
-        "Architect decision logic (rules + thresholds + LLM rationale via claude -p)",
+        "Architect decision logic (rules + thresholds in code; LLM rationale via a daemon tmux pane running claude -p)",
         "Feedback bundle generator (curated markdown)",
         "Iterate flow: coder receives bundle, re-pushes, reviewers + critics re-run",
         "Decision audit log + replayable inputs"
@@ -441,7 +441,7 @@
       "goal": "Per-merge retros. Per-milestone heavyweight critique reads merged code + tests + plan, verdict pass / gaps_found. Gaps become new PlannedPRs. Milestone shipped UI.",
       "pr_count_target": 5,
       "raw_prs": [
-        "Self-improvement worker: post-merge retro markdown via claude -p",
+        "Self-improvement worker: post-merge retro markdown via a daemon-spawned claude -p pane (auto-close on exit)",
         "Retrospective view per project (apply / dismiss)",
         "Final critique runner: post-last-merge, full milestone evaluation",
         "Gap → PlannedPR loop: gaps create new PRs, milestone state in_flight again",

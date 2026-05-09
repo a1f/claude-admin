@@ -19,7 +19,7 @@ You run plans, the daemon runs the work.
 | `architector` | One per `(repo, milestone)`. Tmux pane with claude + architector skill. Decides drop / accept / fix. |
 | `ca-task-processor` | One per dispatched task. State machine (read → plan-actions → coder → review → decide). |
 | `coder` | Tmux pane with claude + coder skill. Fresh worktree per task. |
-| `reviewer` / `critic` | `claude -p` headless subprocesses. Reviewers find code defects; critics judge goal-fit (1-100). |
+| `reviewer` / `critic` | `claude -p` running inside daemon-managed tmux panes (one pane per agent, output `tee`'d to a log file). Reviewers find code defects; critics judge goal-fit (1-100). Live-attachable via `tmux attach -t claude-admin`. |
 | `ca-tui` | ratatui client. Connects to daemon over UDS. Shows progress + alerts. |
 
 Full architecture diagram in [`v1_orchestrator/00-final-plan.html`](v1_orchestrator/00-final-plan.html).
@@ -72,7 +72,7 @@ The orchestrator skills:
 |---|---|
 | `/breakdown` | Milestone → PR-shaped tasks → child GitHub issue with checklist |
 | `/suggest` | Scan the active breakdown, list dispatchable tasks (blockers met) |
-| `/dispatch` | Spawn a headless coder in a fresh worktree for a chosen task |
+| `/dispatch` | Spawn a coder in a fresh worktree for a chosen task — runs inside a tmux pane so progress is attachable |
 | `coder` | _Internal._ System prompt for the coder agent |
 | `reviewer` | _Internal._ System prompt for security / bugs / quality reviewer agents |
 | `critic` | _Internal._ System prompt for goal-fit critics (1-100 scoring) |

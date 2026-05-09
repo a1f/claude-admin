@@ -63,7 +63,7 @@
       <tr><td>State</td><td class="choice">SQLite at ~/.work/ca.db</td><td>Single source of truth for architectors, tasks, decisions, reviews, artifacts.</td></tr>
       <tr><td>Architector runtime</td><td class="choice">Long-running interactive claude session</td><td>One tmux pane per (repo, milestone). architector SKILL.md as system prompt. Talks to daemon via <code>ca</code> CLI in its Bash tool.</td></tr>
       <tr><td>Coder runtime</td><td class="choice">tmux pane with interactive claude</td><td>Visible/attachable. coder SKILL.md as system prompt. Fresh worktree per task.</td></tr>
-      <tr><td>Reviewer / critic runtime</td><td class="choice">claude -p headless subprocesses</td><td>Same pattern as the existing watcher.py. Output parsed as JSON.</td></tr>
+      <tr><td>Reviewer / critic runtime</td><td class="choice">claude -p inside tmux panes</td><td>Each agent runs as <code>claude -p --output-format stream-json | tee log.jsonl</code> inside a tmux pane managed by the daemon. Output parses the same way (JSON), but every run is attachable for live inspection. Pane auto-closes on exit; logs persist on disk.</td></tr>
       <tr><td>Multi-machine</td><td class="choice">Single-machine v1; architecture-aware</td><td>Daemon is local-only for v1. Protocol designed so a remote daemon-bridge service can be added without breaking changes.</td></tr>
       <tr><td>v2_design relationship</td><td class="choice">Sequential phases of one project</td><td>Finish ca_v1 first. v2_design becomes the next plan, building the web admin on top of this daemon.</td></tr>
     </tbody>
@@ -83,8 +83,8 @@ flowchart TB
         direction TB
         TP[ca-task-processor · Rust<br/>state machine · UDS to daemon]
         COD[coder · interactive claude session<br/>tmux pane · coder SKILL · worktree]
-        REV[3 reviewers · claude -p<br/>security · bugs · quality]
-        CRT[3-5 critics · claude -p<br/>goal_alignment]
+        REV[3 reviewers · claude -p in tmux panes<br/>security · bugs · quality]
+        CRT[3-5 critics · claude -p in tmux panes<br/>goal_alignment]
         TP --> COD
         TP --> REV
         TP --> CRT
@@ -119,6 +119,24 @@ flowchart TB
   class GH ext
     </div>
   </div>
+
+  <div class="section-header"><span class="num">§2.5</span><h2>tmux session topology</h2></div>
+  <p class="lede">
+    Every claude invocation runs inside a tmux pane managed by the daemon — no orphaned background subprocesses. Reason: live attachability (<code>tmux attach -t claude-admin</code> shows what every agent is doing right now) without giving up the structured-JSON output the orchestrator depends on.
+  </p>
+  <table>
+    <thead><tr><th style="width: 220px;">Concern</th><th>Choice</th></tr></thead>
+    <tbody>
+      <tr><td>Session</td><td>Single shared session named <code>claude-admin</code>. Daemon creates it on startup if missing.</td></tr>
+      <tr><td>Window per architector</td><td>Window named <code>&lt;repo&gt;:&lt;milestone&gt;</code> with one pane: the long-running architector claude session.</td></tr>
+      <tr><td>Window per dispatched task</td><td>Window named <code>&lt;task-id&gt;</code> opened on dispatch. Holds the coder pane plus the reviewer/critic panes spawned at review time.</td></tr>
+      <tr><td>Pane runtime</td><td>Coder = interactive <code>claude</code>. Everyone else = <code>claude -p --output-format stream-json --include-partial-messages | tee &lt;state-dir&gt;/log.jsonl</code> so the pane scrolls AND the JSON stream lands on disk for the daemon to parse.</td></tr>
+      <tr><td>Output capture</td><td><code>tee</code> inside the pane (clean JSON, no terminal escapes). <code>tmux pipe-pane</code> reserved for the interactive coder pane where stdout isn't a clean stream.</td></tr>
+      <tr><td>Pane lifecycle</td><td>Pane auto-closes when the agent process exits (default tmux behavior — no <code>remain-on-exit</code>). Logs survive on disk under <code>~/.work/dispatches/&lt;plan&gt;/&lt;task-id&gt;/</code>; daemon reads exit code from the JSON stream tail, not the pane.</td></tr>
+      <tr><td>Cleanup</td><td>Daemon reaper sweeps dead windows + orphan panes on every accept loop tick. <code>ca task abort</code> sends SIGTERM to the pane's foreground process, then closes the pane.</td></tr>
+      <tr><td>Reusable manager</td><td>One <code>tmux::SessionManager</code> in <code>ca-daemon</code> built in M2. M4 reuses it for sub-action planning panes; M5 for reviewer + critic fan-out; M9 for milestone-closure critique.</td></tr>
+    </tbody>
+  </table>
 
   <div class="section-header"><span class="num">§3</span><h2>Per-task state machine</h2></div>
   <p class="lede">Inside the task-processor (M4–M6).</p>
@@ -210,7 +228,7 @@ stateDiagram-v2
     <div class="id">M5<span class="sub">api · review</span></div>
     <div>
       <h3>Reviewer + critic fan-out</h3>
-      <div class="goal">3 reviewer + 3-5 critic claude -p subprocesses. Median scoring. Findings posted as PR comment.</div>
+      <div class="goal">3 reviewer + 3-5 critic <code>claude -p</code> instances, each in its own tmux pane via the M2 session manager. Median scoring. Findings posted as PR comment.</div>
       <div class="meta"><span><b>4 PRs</b></span><span><b>risk:</b> high</span><span><b>exit:</b> 3 reviewers + 5 critics on a real PR; recommendation correct on 3/3 test PRs</span></div>
     </div>
   </div>
@@ -278,7 +296,8 @@ stateDiagram-v2
   </ul>
 
   <p style="margin-top:36px; padding-top:14px; border-top:1px solid var(--border); color:var(--text-faint); font-size:12px; font-family:var(--mono);">
-    last updated 2026-05-03 · plan codename: <code>ca_v1</code> · <a href="milestones.json">milestones.json</a> · <a href="../v2_design/00-final-plan.html">v2_design (future phase)</a>
+    last updated 2026-05-09 · plan codename: <code>ca_v1</code> · <a href="milestones.json">milestones.json</a> · <a href="../v2_design/00-final-plan.html">v2_design (future phase)</a>
+    <br/>2026-05-09 · runtime change: all claude invocations now run inside tmux panes (was: <code>claude -p</code> as headless background subprocesses). M2 grows a reusable session manager; M5/M4/M9 reuse it instead of spawning detached processes.
   </p>
 </main>
 </body>

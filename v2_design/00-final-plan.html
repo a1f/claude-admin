@@ -126,7 +126,7 @@
       <tr><td>Frontend stack</td><td class="choice">React + Vite + Tailwind + TanStack Query</td><td class="note">Mocks 06–11 are React-shaped already. xterm.js + CodeMirror integrate cleanly. Server-side renders nothing — pure SPA.</td></tr>
       <tr><td>Database</td><td class="choice">Postgres</td><td class="note">Single instance on the VPS. WAL backups daily. Migrations via sqlx migrate.</td></tr>
       <tr><td>Auth</td><td class="choice">GitHub OAuth (single-user)</td><td class="note">Schema has <code>users</code> table for future multi-user; v1 hard-codes a single allowed login.</td></tr>
-      <tr><td>Agent runtime</td><td class="choice">All <code>claude</code> CLI</td><td class="note">Coder runs in tmux pane on daemon. Reviewers/critics/architect-rationale run via <code>claude -p</code> subprocess on server. Zero per-token API cost — covered by your subscription quota.</td></tr>
+      <tr><td>Agent runtime</td><td class="choice">All <code>claude</code> CLI in tmux panes</td><td class="note">Every claude invocation — coder, reviewers, critics, architect-rationale, final critique — runs inside a tmux pane managed by the laptop daemon. Coder pane is interactive; the rest run <code>claude -p --output-format stream-json | tee log.jsonl</code> so the pane scrolls AND structured output lands on disk. Pane auto-closes on exit. Server reads the streamed log over the WSS tunnel; web UI surfaces the live pane via xterm.js. Zero per-token API cost — covered by your subscription quota.</td></tr>
       <tr><td>Job queue</td><td class="choice">Postgres-backed</td><td class="note">No Redis. One fewer service to operate.</td></tr>
       <tr><td>Object store</td><td class="choice">Local FS + Caddy (v1)</td><td class="note">Migrate to MinIO/S3 later if storage gets unwieldy.</td></tr>
       <tr><td>Architect autonomy</td><td class="choice">Auto-merge after explicit user approval; never auto-redispatch dropped PRs</td><td class="note">Architect makes recommendations and writes rationale; you click ✓.</td></tr>
@@ -142,27 +142,21 @@
   <div class="diagram">
     <div class="mermaid">
 flowchart LR
-  subgraph LAP[Laptop · daemon + tmux]
+  subgraph LAP[Laptop · daemon + tmux · all claude lives here]
     direction TB
-    TM[tmux: claude coder sessions]
-    DM[ca-daemon · Rust]
-    CL1[claude CLI · coder]
-    TM -.observed.-> DM
-    TM --- CL1
+    TM[tmux session 'claude-admin'<br/>window per architector + window per task<br/>panes: coder · reviewers · critics · rationale · final critique]
+    DM[ca-daemon · Rust · SessionManager owns tmux]
+    TM -.streamed logs.-> DM
   end
   subgraph SRV[Self-hosted VPS]
     direction TB
     GW[axum HTTP + WSS]
-    ORCH[Orchestrator · architect logic]
+    ORCH[Orchestrator · architect logic · job queue]
     DB[(Postgres)]
-    Q[Postgres job queue]
     BL[Local FS · artifacts]
-    CL2[claude CLI · reviewers / critics / architect rationale]
     GW --- ORCH
     ORCH --- DB
-    ORCH --- Q
     ORCH --- BL
-    Q --- CL2
   end
   USER[Browser · React SPA]
   GH[GitHub · PRs · issues · CI]
@@ -174,8 +168,8 @@ flowchart LR
   classDef srv fill:#11161f,stroke:#7dd3fc,color:#e5e7eb;
   classDef lap fill:#0e131c,stroke:#fb923c,color:#e5e7eb;
   classDef ext fill:#0e131c,stroke:#64748b,color:#e5e7eb,stroke-dasharray:4 3;
-  class SRV,GW,ORCH,DB,Q,BL,CL2 srv
-  class LAP,DM,TM,CL1 lap
+  class SRV,GW,ORCH,DB,BL srv
+  class LAP,DM,TM lap
   class USER,GH ext
     </div>
   </div>
@@ -199,16 +193,16 @@ flowchart LR
   </ol>
 
   <!-- =================================================== -->
-  <div class="section-header"><span class="num">§4</span><h2>Agent runtime: all-CLI</h2></div>
-  <p class="lede">All agents run via the <code>claude</code> CLI to stay covered by your subscription quota. No per-token API cost.</p>
+  <div class="section-header"><span class="num">§4</span><h2>Agent runtime: all-CLI, all in tmux</h2></div>
+  <p class="lede">Every claude invocation runs inside a tmux pane on the laptop daemon — no headless background subprocesses anywhere. Reason: the operator can <code>tmux attach -t claude-admin</code> at any moment and watch what every agent is doing in real time, and the web UI surfaces the same panes via xterm.js. Server-side decision logic remains rule-based in Rust; when it needs an LLM (rationale, critique), it asks the daemon over WSS to spawn a pane.</p>
   <table>
     <thead><tr><th>Role</th><th>Where it runs</th><th>Invocation</th></tr></thead>
     <tbody>
-      <tr><td><span class="tag role-coder">coder</span></td><td>Laptop daemon</td><td>Long-running interactive <code>claude</code> in a tmux pane, in a fresh worktree. Reads spec_md + plan_context as initial prompt.</td></tr>
-      <tr><td><span class="tag role-reviewer">reviewers</span></td><td>Server</td><td><code>claude -p "&lt;reviewer prompt + diff&gt;"</code> subprocess; capture stdout; parse JSON-formatted findings.</td></tr>
-      <tr><td><span class="tag role-critic">critics</span></td><td>Server</td><td>Same pattern as reviewers; adversarial prompts; JSON output with score + axes.</td></tr>
-      <tr><td><span class="tag role-architect">architect</span></td><td>Server</td><td>Decision logic is rule-based (rules + thresholds in code). When LLM rationale needed: <code>claude -p</code> subprocess.</td></tr>
-      <tr><td>Final critique</td><td>Server</td><td>Heavy <code>claude -p</code> run, reads merged code + tests + plan + acceptance criteria.</td></tr>
+      <tr><td><span class="tag role-coder">coder</span></td><td>Laptop tmux pane (window: <code>&lt;task-id&gt;</code>)</td><td>Long-running interactive <code>claude</code>, in a fresh worktree. Reads spec_md + plan_context as initial prompt.</td></tr>
+      <tr><td><span class="tag role-reviewer">reviewers</span></td><td>Laptop tmux pane (sibling pane in <code>&lt;task-id&gt;</code> window)</td><td><code>claude -p --output-format stream-json "&lt;reviewer prompt + diff&gt;" | tee log.jsonl</code>. Pane scrolls for the operator; daemon parses JSON from log.jsonl and forwards findings to server.</td></tr>
+      <tr><td><span class="tag role-critic">critics</span></td><td>Laptop tmux pane</td><td>Same pattern as reviewers; adversarial prompts; JSON output with score + axes.</td></tr>
+      <tr><td><span class="tag role-architect">architect</span></td><td>Server (rules) + laptop pane (rationale)</td><td>Decision logic is rule-based on the server (rules + thresholds in code). When LLM rationale is needed, server asks daemon to open a <code>claude -p</code> pane (window: <code>&lt;task-id&gt;:rationale</code>); rationale streamed back over WSS.</td></tr>
+      <tr><td>Final critique</td><td>Laptop tmux pane (window: <code>&lt;repo&gt;:&lt;milestone&gt;:closure</code>)</td><td>Heavy <code>claude -p</code> run reading merged code + tests + plan + acceptance criteria; pane is observable for the duration.</td></tr>
     </tbody>
   </table>
 
@@ -598,10 +592,10 @@ flowchart LR
     <div class="id">M6<span class="sub">api · review</span></div>
     <div>
       <h3>Reviewers <span class="api-tag">API</span></h3>
-      <div class="goal">When a PlannedPR enters "drafted", auto-run reviewers via <code>claude -p</code> subprocess. Findings stored, exposed via API. No critic / architect logic yet.</div>
+      <div class="goal">When a PlannedPR enters "drafted", server enqueues a reviewer job. Daemon spawns one tmux pane per reviewer in the task's window via SessionManager; each pane runs <code>claude -p ... | tee log.jsonl</code>. Daemon streams the log to the server; findings stored, exposed via API. No critic / architect logic yet.</div>
       <ol>
-        <li>Job queue (Postgres-backed)</li>
-        <li>Reviewer worker + <code>claude -p</code> wrapper + structured-JSON output parsing</li>
+        <li>Job queue (Postgres-backed) + WSS spawn protocol (server → daemon: open pane with prompt + skill, stream output back)</li>
+        <li>Daemon reviewer worker: SessionManager.spawn_pane(); <code>tee</code> output capture; structured-JSON parsing</li>
         <li>Prompt templates per kind: security / bugs / quality / custom</li>
         <li>Findings storage + REST endpoints; quota usage tracked per call</li>
       </ol>
@@ -634,7 +628,7 @@ flowchart LR
       <div class="goal">Critics score 1–100 across axes. Architect aggregates reviewer + critic output → drop / iterate / accept with rationale. Iterate sends a feedback bundle to coder. UI from M7 gets the verdict panel auto-filled.</div>
       <ol>
         <li>Critic worker + adversarial prompt templates per kind</li>
-        <li>Architect decision logic (rules + thresholds + LLM rationale via <code>claude -p</code>)</li>
+        <li>Architect decision logic (rules + thresholds in code; LLM rationale via a daemon tmux pane running <code>claude -p</code>)</li>
         <li>Feedback bundle generator (curated markdown)</li>
         <li>Iterate flow: coder receives bundle, re-pushes, reviewers + critics re-run</li>
         <li>Decision audit log + replayable inputs</li>
@@ -698,7 +692,7 @@ flowchart LR
       <h3>Self-improvement + final milestone critique</h3>
       <div class="goal">Per-merge retros. Per-milestone heavyweight critique reads merged code + tests + plan, verdict pass / gaps_found. Gaps become new PlannedPRs. Milestone shipped UI.</div>
       <ol>
-        <li>Self-improvement worker: post-merge retro markdown via <code>claude -p</code></li>
+        <li>Self-improvement worker: post-merge retro markdown via a daemon-spawned <code>claude -p</code> pane (auto-close on exit)</li>
         <li>Retrospective view per project (apply / dismiss)</li>
         <li>Final critique runner: post-last-merge, full milestone evaluation</li>
         <li>Gap → PlannedPR loop: gaps create new PRs, milestone state in_flight again</li>

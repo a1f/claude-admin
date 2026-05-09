@@ -12,7 +12,8 @@
     "state": "SQLite at ~/.work/ca.db",
     "architector_runtime": "interactive claude session in tmux pane",
     "coder_runtime": "interactive claude session in tmux pane",
-    "reviewer_critic_runtime": "claude -p headless subprocesses"
+    "reviewer_critic_runtime": "claude -p inside daemon-managed tmux panes (auto-close on exit; logs persist on disk)",
+    "tmux_session_topology": "single 'claude-admin' session; window per architector named '<repo>:<milestone>'; window per dispatched task named '<task-id>' holding coder + reviewer + critic panes"
   },
   "milestones": [
     {
@@ -152,16 +153,17 @@
       "title": "Architector lifecycle",
       "phase": "core",
       "kind": "api",
-      "goal": "Architector is one interactive claude session per (repo, milestone), running in a tmux pane with the architector SKILL.md as its system prompt. Lifecycle: ca architect register opens the pane and registers state in daemon. Architector calls back into daemon via the ca CLI from its Bash tool (no MCP). Persistent across daemon restart.",
-      "pr_count_target": 5,
+      "goal": "Architector is one interactive claude session per (repo, milestone), running in a tmux pane with the architector SKILL.md as its system prompt. Lifecycle: ca architect register opens the pane and registers state in daemon. Architector calls back into daemon via the ca CLI from its Bash tool (no MCP). Persistent across daemon restart. Also lands the reusable tmux::SessionManager that M4/M5/M9 reuse (so we never spawn detached claude subprocesses).",
+      "pr_count_target": 6,
       "raw_prs": [
-        "ca architect register --repo --milestone --issue: writes Architector row, opens tmux pane",
-        "tmux orchestration: session 'claude-admin', window per architector named '<repo>:<milestone>', send-keys to start claude with architector skill",
+        "tmux::SessionManager module (ca-daemon): create/list/kill panes in the shared 'claude-admin' session; window-per-architector + window-per-task naming convention; pane lifecycle (auto-close on exit, dead-pane reaper); log path convention; unit tests against a real tmux server in CI",
+        "ca architect register --repo --milestone --issue: writes Architector row, opens tmux pane via SessionManager",
+        "tmux orchestration: window per architector named '<repo>:<milestone>', send-keys to start claude with architector skill",
         "skills/architector/SKILL.md: identity, allowed daemon RPCs, decision rubric, when to ask user",
-        "ca architect list / ca architect attach / ca architect kill",
-        "Recovery: on daemon start, re-load architectors from DB; mark stale tmux panes"
+        "ca architect list / ca architect attach / ca architect kill (kill routes through SessionManager)",
+        "Recovery: on daemon start, re-load architectors from DB; SessionManager reaps stale tmux panes; restart-survival test"
       ],
-      "exit_criteria": "ca architect register opens a working architector that can call ca task list and see itself; architector survives daemon restart (state preserved, pane re-attached)",
+      "exit_criteria": "ca architect register opens a working architector that can call ca task list and see itself; architector survives daemon restart (state preserved, pane re-attached); SessionManager is the only path that spawns claude (no direct subprocess::spawn of claude anywhere)",
       "risk": "medium",
       "depends_on": ["M1"],
       "status": "planned",
@@ -177,7 +179,7 @@
       "raw_prs": [
         "Port breakdown logic to Rust: read issue body via gh, draft tasks, write to DB, mirror to GH issue checklist",
         "ca task list / ca task get <id> / ca task show <id> commands",
-        "Critique step after breakdown: claude -p judges 'does this task list actually accomplish the milestone?' — must pass before tasks become dispatchable",
+        "Critique step after breakdown: spawns a claude -p pane via tmux::SessionManager (window: '<repo>:<milestone>:critique', auto-close on exit) that judges 'does this task list actually accomplish the milestone?' — must pass before tasks become dispatchable",
         "tasks.md per architector kept in sync with DB (file is human-readable mirror)"
       ],
       "exit_criteria": "ca task list shows the breakdown for a real milestone; the post-breakdown critique passes on at least 2 milestones",
@@ -191,13 +193,13 @@
       "title": "Task-processor + coder dispatch",
       "phase": "dispatch",
       "kind": "api",
-      "goal": "ca-task-processor binary, one process per dispatched task. Daemon spawns it. Task-processor breaks the task into sub-actions (saved to tasks.md inside the worktree), then for each: spawns coder in a tmux pane (claude with coder SKILL.md), watches for commits, signals architector. Coder gets fresh worktree. git push works (gh auth setup-git fix).",
+      "goal": "ca-task-processor binary, one process per dispatched task. Daemon spawns it. Task-processor opens a per-task tmux window (named '<task-id>') via SessionManager, breaks the task into sub-actions (saved to tasks.md inside the worktree), then for each: spawns coder in a pane in that window (claude with coder SKILL.md), watches for commits, signals architector. Coder gets fresh worktree. git push works (gh auth setup-git fix).",
       "pr_count_target": 5,
       "raw_prs": [
         "ca-task-processor binary: state machine (read_task, plan_actions, await_coder, await_review, decide), UDS to daemon",
-        "git worktree creation + gh auth setup-git so git push works in subprocess context",
-        "Sub-action planning: claude -p call to break task into commits (test scenarios are sub-actions too); writes tasks.md to worktree",
-        "Coder dispatch: tmux pane with claude + coder SKILL.md, --strict-mcp-config, --disallowedTools 'mcp__*'",
+        "git worktree creation + gh auth setup-git so git push works inside the tmux pane",
+        "Sub-action planning: claude -p pane (via SessionManager, in the task's window) breaks task into commits — test scenarios are sub-actions too — writes tasks.md to worktree; pane closes on exit, JSON log retained",
+        "Coder dispatch: opens a pane in the task's tmux window with interactive claude + coder SKILL.md, --strict-mcp-config, --disallowedTools 'mcp__*'",
         "Commit watcher: poll git log on the branch + heuristic to know when coder's done with a sub-action"
       ],
       "exit_criteria": "Dispatching one task end-to-end: worktree → coder writes commits → task-processor sees them; coder is attachable in tmux; git push works first try",
@@ -211,15 +213,15 @@
       "title": "Reviewer + critic fan-out",
       "phase": "review",
       "kind": "api",
-      "goal": "After each commit (or after coder signals done), task-processor fans out reviewers (3 kinds) + critics (3-5 instances) as claude -p subprocesses with their respective SKILL.md as system prompt. JSON output parsed, median scores computed, structured findings stored. Findings posted as PR review comments.",
+      "goal": "After each commit (or after coder signals done), task-processor fans out reviewers (3 kinds) + critics (3-5 instances) as claude -p panes in the task's tmux window via SessionManager (one pane per agent, each running 'claude -p ... | tee log.jsonl'). Panes auto-close on exit; JSON logs are parsed by the daemon. Median scores computed, structured findings stored. Findings posted as PR review comments. Operator can 'tmux attach -t claude-admin' and watch any reviewer/critic stream live.",
       "pr_count_target": 4,
       "raw_prs": [
-        "Spawn pool: parallel claude -p subprocs with timeout + result aggregation",
+        "Pane fan-out: SessionManager.spawn_pane() in parallel for each reviewer/critic (panes named 'review-security', 'review-bugs', 'review-quality', 'critic-1'..'critic-N' inside the task window); per-pane log.jsonl path; per-pane timeout that sends SIGTERM via pane_id; result aggregation reads the closed-pane log files",
         "Output parser robust to markdown fences / prose-around-JSON (port from watcher.py)",
         "Median score + recommendation logic (accept ≥80 / iterate 60-79 / drop <60); blocker findings force iterate",
-        "PR comment composer: consolidated markdown comment via gh pr comment"
+        "PR comment composer: consolidated markdown comment via gh pr comment; comment includes 'tmux attach -t claude-admin -c <task-id>' hint until panes close"
       ],
-      "exit_criteria": "On a real PR: 3 reviewer + 5 critic outputs land within 3 min, aggregated comment posted, recommendation correct on 3/3 test PRs (one accept, one iterate, one drop)",
+      "exit_criteria": "On a real PR: 3 reviewer + 5 critic panes land within 3 min, aggregated comment posted, recommendation correct on 3/3 test PRs (one accept, one iterate, one drop); during the run an operator can attach the tmux session and see each pane's stream-json scroll past in real time; all panes are gone from `tmux list-panes` after the run",
       "risk": "high",
       "depends_on": ["M4"],
       "reuses": "skills/reviewer/SKILL.md + skills/critic/SKILL.md + watcher.py aggregation logic",
@@ -294,7 +296,7 @@
       "goal": "When all tasks in a milestone close, architector triggers final critique: 3-5 critics score milestone completeness 1-100 against the original goal. Median ≥ threshold ships the milestone (TUI shows shipped). Below threshold → architector adds gap-filling tasks back into tasks.md. Plan reconciliation: improver/test-builder/revisit invoked per merged PR; outputs stored, surfaced in TUI for the human to act on.",
       "pr_count_target": 4,
       "raw_prs": [
-        "Final milestone critique: spawn 3-5 critic claude -p calls evaluating milestone-level completion; aggregate; verdict",
+        "Final milestone critique: spawn 3-5 critic claude -p panes via SessionManager (window: '<repo>:<milestone>:closure', one pane per critic, auto-close on exit); aggregate from log files; verdict",
         "Gap-to-task: when verdict 'gaps_found', add new tasks to architector's tasks.md and re-enter dispatch loop",
         "Per-merge plan reconciliation: improver + test-builder + revisit run; outputs land in DB + TUI",
         "Milestone-shipped UI: timeline, links to all merged PRs, final verdict, retros"

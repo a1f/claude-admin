@@ -14,7 +14,7 @@
         "backend": "Rust + axum + sqlx",
         "frontend": "React + Vite + Tailwind + TanStack Query",
         "db": "Postgres",
-        "agent_runtime": "claude CLI (subprocess for headless, tmux for coder)"
+        "agent_runtime": "claude CLI in tmux panes for everyone (interactive for coder/architect; claude -p inside a pane for reviewers/critics/rationale — pane auto-closes on exit, JSON log persisted via tee)"
       }
     }
   }

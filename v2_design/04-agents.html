@@ -16,9 +16,11 @@
 <main class="app">
   <h1>Agents &amp; orchestration</h1>
   <p class="lede">
-    Five roles. The architect is the boss; everyone else is a tool the architect uses. Coder is interactive
-    (long-running tmux session, can ask questions). Reviewers, critics, validators are headless — short Claude
-    API calls returning structured output.
+    Five roles. The architect is the boss; everyone else is a tool the architect uses. Every claude invocation
+    runs inside a tmux pane managed by the laptop daemon — coder is interactive (long-running, can be attached),
+    reviewers / critics / validators run <code>claude -p --output-format stream-json | tee log.jsonl</code> in
+    short-lived panes that auto-close on exit. Same observability story for everyone; structured output flows
+    over WSS to the server regardless.
   </p>
 
   <h2>Roles at a glance</h2>

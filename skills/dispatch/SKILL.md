@@ -1,12 +1,12 @@
 ---
 name: dispatch
-description: "Dispatch a task to a claude coder running in a fresh git worktree inside a tmux pane (window named after the task-id, in the shared 'claude-admin' session). Re-checks blockers, creates worktree + branch, spawns 'claude -p ... | tee log.jsonl' inside the pane (so operator can tmux attach and watch), starts a watcher that monitors progress and detects done/stuck/permission-blocked states. Use when the user asks to dispatch a task / start coding / kick off a coder for a task / invokes /dispatch. Examples: '/dispatch v2_design M0a-T1', 'dispatch M0a-T1', 'start the coder for M0a-T1'."
+description: "Dispatch a task to a headless claude coder running in a fresh git worktree. Re-checks blockers, creates worktree + branch, spawns claude -p as background subprocess (with stream-json output to a log file), starts a watcher that monitors progress and detects done/stuck/permission-blocked states. Use when the user asks to dispatch a task / start coding / kick off a coder for a task / invokes /dispatch. Examples: '/dispatch v2_design M0a-T1', 'dispatch M0a-T1', 'start the coder for M0a-T1'."
 argument-hint: "<plan-codename> <task-id> [--force]"
 ---
 
 # Dispatch skill
 
-Spin up a claude coder for one task in its own tmux pane. The pane runs `claude -p ... | tee log.jsonl` so the JSON stream still hits disk for the watcher to parse, AND the operator can `tmux attach -t claude-admin` to watch it scroll live. No API costs (uses subscription via `claude -p`).
+Spin up a headless claude coder for one task. No tmux, no TTY, no API costs (uses subscription via `claude -p`).
 
 ## Inputs
 
@@ -32,9 +32,7 @@ The script:
 - `git fetch origin <default_base>`
 - Creates worktree at `~/dev/claude-admin-worktrees/<task-id>/` with branch `<task-id>` from `origin/<default_base>`
 - Initializes state at `~/.work/dispatches/<plan>/<task-id>/state.json` (phase=spawning)
-- Ensures the `claude-admin` tmux session exists (creates it detached if missing)
-- Opens a tmux window named `<task-id>` in the `claude-admin` session, working dir = the worktree
-- Spawns coder inside that window: `claude -p --output-format stream-json ... 2>>coder.stderr | tee log.jsonl`. Pane scrolls for the operator; JSON lands on disk for the watcher. Pane auto-closes when claude exits.
+- Spawns coder: `claude -p --output-format stream-json` background subprocess; stdout → `log.jsonl`
 - Spawns watcher: `watcher.py wait <plan> <task-id>` background subprocess; updates `state.json`, polls GH for draft PR, detects stuck/permission-blocked/errored
 - Updates `milestones.json` with dispatch metadata
 - Prints a one-screen summary
@@ -43,10 +41,9 @@ The script:
 
 Pass through verbatim. It includes:
 
-- Dispatch confirmation with tmux window target (e.g. `claude-admin:M0a-T1`), worktree, branch, watcher PID
+- Dispatch confirmation with PIDs, worktree, branch
 - Where to find the log + state file
 - One-line `/status` invocation
-- Hint: `tmux attach -t claude-admin \; select-window -t <task-id>` to watch the coder live
 
 ### 3. (Optional) Offer to immediately tail status
 
@@ -62,8 +59,7 @@ python3 /Users/alf/.claude/skills/dispatch/scripts/watcher.py status <plan> <tas
 
 Refuses to dispatch if branch, worktree, or state dir already exist. With `--force`:
 
-- Kills the tmux window (`tmux kill-window -t claude-admin:<task-id>`) — closes the pane and SIGKILLs the entire process tree under it
-- Sends SIGTERM to the watcher PID (from state.json), waits 5s, SIGKILL if still alive
+- Sends SIGTERM to existing coder + watcher PIDs (from state.json), waits 5s, SIGKILL if still alive
 - `git worktree remove --force <worktree>`
 - `git branch -D <task-id>`
 - Removes `~/.work/dispatches/<plan>/<task-id>/`

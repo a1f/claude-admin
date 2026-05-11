@@ -1,0 +1,14 @@
+# Goals · <milestone-id>
+
+> Immutable deliverables. Once ratified, this file is read-only.
+> Each goal must be observable — "we'll know we're done when X exists/passes/is true".
+
+## Deliverables
+
+- [ ] **G1** · <short name>
+  - **Observable when:** <concrete signal — file exists / test passes / command returns X>
+  - **Why:** <1 line, the load-bearing reason>
+
+- [ ] **G2** · <short name>
+  - **Observable when:** <signal>
+  - **Why:** <reason>

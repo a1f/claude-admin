@@ -1,0 +1,14 @@
+# Validations · <milestone-id>
+
+> Immutable test scenarios. Once ratified, this file is read-only.
+> Each scenario must be runnable (or manually checkable) and tied to one or more goals above.
+
+## Scenarios
+
+- **V1** · _unit_ — `test_name_snake_case` — covers G1
+  - **What it tests:** <one line>
+  - **How:** <test file path or shell command>
+
+- **V2** · _e2e_ — `e2e_scenario_snake_case` — covers G2
+  - **What it tests:** <one line>
+  - **How:** <test file path or shell command>

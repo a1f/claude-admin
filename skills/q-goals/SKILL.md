@@ -1,109 +1,136 @@
 ---
 name: q-goals
-description: "Draft + ratify the immutable goals and validation scenarios for a milestone. Manual mode (MVP): opens templates in $EDITOR, runs structure validators on save, freezes the files (chmod 444 + checksum) on ratify. Use when the user invokes /q-goals or asks to define goals for a milestone/task/issue. Examples: '/q-goals ca_v1 Phase1', 'draft goals for M2', 'set up goals + validations for milestone X'."
-argument-hint: "<plan-codename> <milestone-id>"
+description: "Convert a plan into a GH issue with checkboxed goals + validations. Reads plan from conversation context, prompt text, or a GH issue URL. Confirms each step via AskUserQuestion. Posts the result as a new (or updates an existing) issue in caveman style. Ratify by adding the `goals-ratified` label. Use when the user invokes /q-goals or asks to define goals for a milestone/feature/plan."
+argument-hint: "[plan-source: gh-issue-url | inline text | (omit to use conversation context)]"
 ---
 
 # q-goals
 
-Draft + ratify the immutable **goals** and **validations** for one milestone.
+Turn a plan into an immutable **goals + validations** contract on GitHub.
 
-The output is a contract: once ratified, the goal set is frozen and every subsequent task is measured against it. This is how the architect (you) is held accountable to a stable definition of "done."
+The agent invoking this skill IS the writer. No subagent, no Python script, no local files. Source of truth = the GitHub issue.
 
 ## Inputs
 
-`/q-goals <plan-codename> <milestone-id>`
+`/q-goals [plan-source]`
 
-Examples:
-- `/q-goals ca_v1 Phase1`
-- `/q-goals ca_v1 M3`
+Plan source resolves in priority order:
 
-If args missing, ask via AskUserQuestion. To find a plan codename, look in `~/.claude/plans/registry.json`.
+1. **GH issue URL** — `/q-goals https://github.com/org/repo/issues/123` → read via `gh issue view 123 --repo org/repo`.
+2. **Inline text** — `/q-goals build a daemon that ...` → treat the prompt tail as the plan.
+3. **Conversation context** — if no arg, use the plan visible in the current chat.
 
-## Mode
+If none of those resolve to a real plan, ask via AskUserQuestion where the plan lives. Do NOT guess.
 
-Manual mode only for MVP. No LLM agents — you are the architect. The skill:
+## Workflow
 
-1. Resolves `<plan-codename>` → `<plan_dir>` via the registry.
-2. Creates `<plan_dir>/<milestone-id>/` if missing.
-3. Writes `goals.md` and `validations.md` from templates if they don't already exist.
-4. **Refuses to proceed if `.ratified.json` is present.** Goals are immutable post-ratify.
-5. Opens `goals.md` in `$EDITOR` (default `vi`). On editor exit, runs the goals validator.
-6. Opens `validations.md` in `$EDITOR`. On editor exit, runs the validations validator + cross-reference (every `G<N>` in validations must exist in goals).
-7. Loops the editor on validator failure with errors printed.
-8. On all validators clean: prints summary and asks `ratify? [y/N]` on stdin.
-9. On `y`: computes sha256 of both files, writes `.ratified.json` (with `ratified_at`, hashes, plan, milestone-id), `chmod 444` both files.
+1. **Read the plan.** From URL / prompt text / context per above.
+2. **Decide target repo.** AskUserQuestion: which repo + does the goals issue go in this same repo or another? Default = repo the plan-source issue lives in (or current working directory's repo).
+3. **Check for existing ratified issue.** Run `gh issue list --search "goals: <plan-title>" --label goals-ratified`. If a ratified goals issue for this plan already exists, **STOP** and print "frozen at <url>. unfreeze: `gh issue edit <num> --remove-label goals-ratified`".
+4. **Study the target repo.** The agent MUST read the repo before drafting — goals in a vacuum produce vague checkboxes. Minimum study set:
+   - `CLAUDE.md` (root + any sub-dir `CLAUDE.md` files) — project conventions
+   - `README.md` (root) — what the project is
+   - Stack config file: `Cargo.toml` / `pyproject.toml` / `package.json` / `go.mod` — language + dependencies + test commands
+   - Top-level dir listing — what crates / packages / modules exist
+   - Any plan-source-relevant code path (if plan mentions a module, read its current state)
 
-LLM-driven mode (architect + writer + critique agents) is deferred. The structure is designed so the manual flow drops cleanly into agent mode later by replacing the editor step with a writer-agent + critique-agent loop.
+   For larger / unfamiliar repos, dispatch the `Explore` subagent: `"Survey the repo at <path>: stack, top-level structure, test commands, what already exists relevant to <plan summary>. Report in under 200 words."`
 
-## Files written
+   Goals must reference **real** file paths, **real** test commands (e.g. `cargo test --workspace`, `pytest`, `pnpm test`), and **real** conventions that exist in the repo. If the plan asks for something that contradicts the repo (e.g. proposes Python in a Rust repo), surface that conflict to the user via AskUserQuestion before drafting.
 
-Under `<plan_dir>/<milestone-id>/`:
+5. **Draft goals + validations.** Use the template below. Write the issue body in caveman style (terse — drop articles/filler; keep facts, paths, commands, checkboxes). Each `observable:` and each `how:` should cite a real path/command from your study.
+6. **Confirm goals via AskUserQuestion.** Ask: "goals cover plan?" — options: looks right / add more / remove some / restart. Loop until user picks "looks right".
+7. **Confirm validations via AskUserQuestion.** Same loop for validations.
+8. **Confirm post target.** AskUserQuestion: new issue in `<repo>` / update existing issue (provide #) / cancel.
+9. **Post.**
+   - New: `gh issue create --repo <org/repo> --title "goals · <plan-name>" --body "<caveman body>"`.
+   - Update: `gh issue edit <num> --repo <org/repo> --body "<caveman body>"` (only if issue is NOT already labeled `goals-ratified`).
+10. **Tell user how to ratify** — print the literal command:
+    ```
+    gh issue edit <num> --repo <org/repo> --add-label goals-ratified
+    ```
+    **Do NOT add the label automatically.** Ratify is an explicit human act.
 
-```
-goals.md          ← deliverables (immutable after ratify)
-validations.md    ← test scenarios (immutable after ratify)
-.ratified.json    ← {ratified_at, plan, milestone, goals_sha256, validations_sha256}
-```
+## Hard rules
 
-## Structure required
+- **No Python script. No persistent local state.** The agent does the work; the GitHub issue holds the result.
+- **Study the repo before drafting.** Goals must cite real paths + real commands. The `Explore` subagent is allowed for broader scans; it's not an LLM "agent" in the q-goals sense, just a read-only repo survey.
+- **Caveman style for the issue body only.** This SKILL.md stays readable English.
+- **Every goal + every validation is a checkbox** (`- [ ]`).
+- **Refuse to edit an issue with `goals-ratified` label.** Print the unfreeze command instead.
+- **Never auto-apply the `goals-ratified` label.** User does it.
+- **Confirm every step via AskUserQuestion.** No free-form questions. Each ambiguity = an AskUserQuestion.
 
-### `goals.md`
+## Caveman style — what it means for the issue body
 
-```
-## Deliverables
+Drop: articles (the / a / an), pleasantries, hedge words ("should", "may", "could probably"), filler ("note that", "it is worth mentioning").
+
+Keep: nouns, verbs, file paths, command names, references (G1, V3), checkboxes.
+
+| normal | caveman |
+|---|---|
+| "The daemon should start when the user runs `ca daemon`." | "daemon starts on `ca daemon`." |
+| "We expect that the test will verify the end-to-end flow." | "test verifies e2e flow." |
+| "It is important that the data is persisted to disk." | "data persists on disk." |
+
+Body must stay readable. Don't drop nouns or verbs. Don't abbreviate words. Just cut filler.
+
+## Issue body template (post this, in caveman style)
+
+```markdown
+# goals · <plan-or-milestone-name>
+
+> immutable. ratify: add `goals-ratified` label. unfreeze: remove label.
+> source plan: <issue url | "inline text in prompt" | "conversation context on YYYY-MM-DD">
+
+## deliverables
 
 - [ ] **G1** · <short name>
-  - **Observable when:** <concrete signal>
-  - **Why:** <one line>
+  - observable: <concrete signal — file exists / test passes / command returns X>
+  - why: <one line>
+
+- [ ] **G2** · <short name>
+  - observable: <signal>
+  - why: <reason>
+
+## validations
+
+- [ ] **V1** · _unit_ — `test_name_snake_case` — covers G1
+  - what: <one line>
+  - how: <path or command>
+
+- [ ] **V2** · _e2e_ — `scenario_name_snake_case` — covers G1, G2
+  - what: <one line>
+  - how: <path or command>
+
+- [ ] **V3** · _manual_ — `manual_check_name` — covers G2
+  - what: <one line>
+  - how: <visual check or command>
 ```
 
-Validator rules:
-- `## Deliverables` section is present.
-- Every `- [ ] **G<N>** ·` bullet has `**Observable when:**` and `**Why:**` lines in the same block.
-- `G<N>` are unique and sequential from 1.
-- No template placeholders (`<short name>`, `<concrete signal …>`, `<one line>`, etc.) left in the file.
+Validation kinds: `unit` / `integration` / `e2e` / `manual`. Pick the right one per scenario.
 
-### `validations.md`
+## Structural rules for the issue body
 
-```
-## Scenarios
+- `## deliverables` section present.
+- `## validations` section present.
+- Every G-item has `observable:` and `why:` sub-bullets.
+- Every V-item has `what:` and `how:` sub-bullets.
+- Every V-item's `covers G<N>` refers to a G defined above.
+- G-numbers + V-numbers sequential from 1, no gaps.
+- No template placeholders (`<short name>`, `<signal>`, etc.) left in the posted body.
 
-- **V1** · _unit_ — `test_name_snake_case` — covers G1
-  - **What it tests:** <one line>
-  - **How:** <test path or shell command>
-```
+If your draft violates any of these, fix BEFORE the confirm step — don't make the user catch structural slop.
 
-Validator rules:
-- `## Scenarios` section is present.
-- Every `- **V<N>** ·` bullet matches the kind/name/covers pattern.
-- Every `G<N>` referenced must exist in `goals.md`.
-- No template placeholders remain.
-- (Warning, not blocker) every goal in `goals.md` should be covered by ≥1 scenario.
+## Companion: `/q-breakdown`
 
-## Ratify
-
-Once you press `y` at the prompt:
-
-- `chmod 444` is applied to `goals.md` and `validations.md`.
-- `.ratified.json` is written with sha256 hashes — later code can verify the files weren't mutated post-ratify.
-- The skill refuses to re-run on this milestone (`.ratified.json` exists → "frozen on ..." message).
-
-## Unfreezing (admin escape hatch)
-
-Out of MVP scope for `q-goals` itself. Manually: `rm <plan_dir>/<milestone-id>/.ratified.json && chmod 644 goals.md validations.md` — but this is an audit-trail violation. Use only when the goals were demonstrably wrong, and capture the reason in a commit message.
-
-## Running it
-
-```bash
-python3 /Users/alf/dev/claude_admin/skills/q-goals/scripts/q_goals.py <plan-codename> <milestone-id>
-```
-
-The skill body above tells you what gets created and asked. Pass through script output verbatim — it prints summary lines and prompts.
+After ratify, `/q-breakdown <goals-issue-url>` reads the ratified goals + validations issue and produces a separate **breakdown issue** with PR-sized task list. Goals issue stays source of truth for "what we promised"; breakdown issue is the mutable task list.
 
 ## What this skill does NOT do
 
-- No LLM invocation. No tmux. No subprocess agents. Pure local editor + validator loop.
-- No sqlite. The `.ratified.json` sentinel is enough for manual mode; `MS-0` mirrors this to sqlite later.
-- No git commit. The user commits the resulting markdown when ready.
-- No automatic re-open after ratify. That's a separate admin command (out of MVP).
+- No background subprocess / no agent fan-out. The current agent does the drafting + posting. (The `Explore` subagent is allowed in the study step — read-only repo survey, returns a summary, ends.)
+- No local markdown files. No `.ratified.json` sentinel. No `chmod 444`.
+- No Python. No tests. No `uv` / pytest dependency.
+- No LLM-driven critique loop. AskUserQuestion is the only feedback mechanism in MVP.
+- No automatic ratify. User adds the label.
+- No q-breakdown work. Separate skill.

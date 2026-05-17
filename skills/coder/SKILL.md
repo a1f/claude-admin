@@ -13,10 +13,20 @@ There is a human at the keyboard. You may ask the user a clarifying question whe
 ## Operating context
 
 - `cwd` is a git worktree on a feature branch. Confirm with `git rev-parse --show-toplevel`, `git branch --show-current`, `git status`.
-- Default base = whatever the branch was cut from (`git merge-base --fork-point` or ask).
 - The task spec arrives as an argument: GH issue URL/number, plan task id (e.g. `M0a-T1`), or a free-form description. If absent, ask once.
 - Backend is **claude only** (codex deferred). All subagents use the `Agent` tool.
 - The terminal output is what the user sees — keep status lines short.
+
+### Deriving `<base>` (the PR target branch)
+
+Every `git diff <base>...HEAD` in this skill needs `<base>` resolved up front. Do this once in Phase 1 and remember it:
+
+1. If the task spec names a target branch (e.g. plan `default_base` in `~/.claude/plans/registry.json`, or the parent issue's milestone branch), use that.
+2. Otherwise: `git config --get branch.$(git branch --show-current).merge` → strips to the upstream short name. If set, that's `<base>`.
+3. Otherwise: `git merge-base --fork-point origin/main HEAD` (or `origin/master`). If it resolves, `<base>` = `origin/main`/`master`.
+4. Otherwise, ask the user — once.
+
+Write the resolved `<base>` into `plan.md`'s header so subagents read it from there.
 
 ## Phases at a glance
 
@@ -61,6 +71,7 @@ Goal: a `plan.md` at the worktree root that lists commit-sized tasks the PR will
 3. **Draft `plan.md`** at the worktree root using the format below. Add it to `.git/info/exclude` (NOT `.gitignore` — local-only ignore so we don't pollute the diff).
 
 4. **Show the plan to the user** and ask: "Plan looks right? Adjustments?" Wait for a yes/edits. Then proceed.
+   - **Autonomous-mode escape**: if the user has explicitly asked you to run unattended (e.g. "just go", "run autonomously", a `/loop` invocation, a hook context with no human at the keyboard), skip the wait. Summarise the plan in one paragraph + the task list, log "no user present — proceeding", and continue to Phase 2.
 
 ### plan.md format
 
@@ -87,9 +98,10 @@ Goal: a `plan.md` at the worktree root that lists commit-sized tasks the PR will
 - [ ] all project gates pass (fmt, lint, test)
 
 ## final-review scores
-_(filled by phase 4)_
-- reviewers (avg of 5): —
-- critics    (avg of 3): —
+_(filled by phase 4 — counts depend on the tier picked for this diff size)_
+- reviewers (avg of N): —
+- critics   (avg of M): —
+- CRITICAL findings: —
 - verdict: —
 ```
 
@@ -133,18 +145,21 @@ For each unchecked task in `plan.md`, in declared order (or in parallel batches 
    ```
    Light review of commit <sha> on this branch.
    Scope: only that commit's diff.
-   Check: code quality, obvious bugs, style, language rules
-     (Python -> python-coding-rules skill; Rust -> rust-code-rules skill; etc.)
-   Plus conformance to the nearest CLAUDE.md / MODULES.md / per-module LESSONS.md
-     for the files in the diff.
+   Check: code quality, obvious bugs, style, language idiom.
+     - Apply the conventions in the nearest CLAUDE.md (Python 3.12+, Rust 2024,
+       project rules) to the files in the diff.
+     - Apply MODULES.md and per-module LESSONS.md for the touched modules.
+     (Subagents cannot auto-invoke other skills — use your own knowledge of the
+      idiom + the project's CLAUDE.md text.)
 
-   Output exactly these lines, nothing else:
+   Output EXACTLY these lines, nothing else, no markdown fences:
      GRADE: <A+ | A | A- | B+ | B | B- | C | D | F>
      CRITICAL: <yes | no>
      SUMMARY: <one sentence>
      ITEMS:
        - <severity: critical|major|minor|nit> <file:line> <what + concrete fix>
        - ...
+   If no items: write the literal line "  - none" under ITEMS.
    ```
 
    **Critic prompt** (subagent_type: `general-purpose`):
@@ -153,13 +168,14 @@ For each unchecked task in `plan.md`, in declared order (or in parallel batches 
    Question: did this commit actually complete task <T#> as stated in plan.md?
    Read plan.md task line and the commit's diff. Be honest, not generous.
 
-   Output exactly:
+   Output EXACTLY, no markdown fences:
      GRADE: <A+ | A | A- | B+ | B | B- | C | D | F>
      CRITICAL: <yes | no>
      SUMMARY: <one sentence>
      GAPS:
        - <what the task asked for that the commit didn't deliver>
        - ...
+   If no gaps: write the literal line "  - none" under GAPS.
    ```
 
 4. **Decision rubric** (you, the architect, decide):
@@ -201,25 +217,41 @@ Only proceed to Phase 4 with a green self-review.
 
 ---
 
-## Phase 4 — final review (5 reviewers + 3 critics)
+## Phase 4 — final review (fan-out scaled to diff size)
 
-Send **one message with 8 parallel `Agent` tool calls**:
+**Cost warning**: this phase is expensive — 5–8 subagents each reading the full diff + context. Only enter Phase 4 once self-review is green. If the diff is trivial (<50 LOC, one task, light review already came back ≥ A), you may down-scale further or skip straight to publish with a note in the PR body.
 
-- **5 reviewers** — letter grade + critical flag. Divide focus so they don't all look at the same axis:
-  1. `bugs` — logic errors, edge cases, races, resource leaks.
-  2. `bugs` — error handling, type/null safety, concurrency (second pair of eyes on the same axis).
-  3. `quality` — naming, dead code, duplication, abstraction.
-  4. `quality` — language rules conformance (python-coding-rules / rust-code-rules / project CLAUDE.md).
-  5. `security` — secrets, injection, authz, sensitive data leakage.
+### Pick the fan-out tier based on `git diff <base>...HEAD --shortstat`
 
-- **3 critics** — does the PR actually do what the task asked?
-  Each critic gets the task spec + the diff + the PR body draft (you write it; see Phase 5). Independent runs.
+| Diff size       | Reviewers              | Critics |
+|-----------------|------------------------|---------|
+| ≤ 200 LOC       | 3 (bugs, quality, security) | 2 |
+| 201 – 800 LOC   | 4 (bugs ×2, quality, security) | 2 |
+| > 800 LOC       | 5 (bugs ×2, quality ×2, security) | 3 |
 
-Prompts: same shape as Phase 2's light reviewer/critic, but pin each reviewer to its single kind and feed them the full PR diff via `git diff <base>...HEAD` paths or `git show` for context.
+Send **one message with all calls in parallel**.
+
+### Reviewer roles (assign in order of the tier above)
+
+1. `bugs` — logic errors, edge cases, races, resource leaks.
+2. `bugs` — error handling, type/null safety, concurrency (second pair of eyes on the same axis; only at tier 2+).
+3. `quality` — naming, dead code, duplication, abstraction.
+4. `quality` — language idiom + project CLAUDE.md conformance (only at tier 3).
+5. `security` — secrets, injection, authz, sensitive data leakage.
+
+### Critic role
+
+Each critic answers: **does the PR actually do what the task asked, and nothing more?** Independent runs — don't tell them about each other's output.
+
+Each critic gets: task spec + full diff + PR body draft (you write it; see Phase 5).
+
+### Prompts
+
+Same shape as Phase 2's light reviewer/critic (including the "If no items / no gaps: write the literal line `  - none`" rule). Pin each reviewer to its single kind. Feed them the full PR diff via `git diff <base>...HEAD` paths or `git show` for context.
 
 **Aggregate**:
-- Reviewer GPA (A+=4.3, A=4.0, A-=3.7, B+=3.3, B=3.0, B-=2.7, C=2.0, D=1.0, F=0). Average over 5.
-- Critic GPA. Average over 3.
+- Reviewer GPA (A+=4.3, A=4.0, A-=3.7, B+=3.3, B=3.0, B-=2.7, C=2.0, D=1.0, F=0). Average over however many reviewers you ran in this tier.
+- Critic GPA. Same scale, average over your critic count.
 - Any CRITICAL anywhere → **must address**.
 - Any individual grade `B-` or lower → **must address that specific item**.
 - Otherwise it's your call. A green PR has reviewer GPA ≥ 3.3 AND critic GPA ≥ 3.3 AND zero CRITICALs.

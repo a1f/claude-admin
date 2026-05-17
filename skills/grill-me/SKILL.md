@@ -18,6 +18,6 @@ If the plan references specific files, modules, or terms, open those too. Skip f
 
 Do not ask the first question until this study is done. State what you learned in one or two sentences before the first question, so I can correct any misreadings.
 
-Ask the questions one at a time.
+Ask the questions one at a time using the `AskUserQuestion` tool. Put your recommended answer first in the options list and label it `(Recommended)`; include 1-3 plausible alternatives so I can redirect with one click.
 
 If a question can be answered by exploring the codebase, explore the codebase instead.

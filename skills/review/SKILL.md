@@ -1,27 +1,36 @@
 ---
 name: review
-description: "Multi-agent PR review via Claude. Fans out N parallel reviewers across 5 kinds (bugs, quality, architecture, tests, bulletproof), aggregates findings, posts a summary table + per-kind detail comments to the PR, and applies a CRITICAL label if any blocker is found. Use when the user asks to /review a PR, multi-review a PR, or wants reviewer agents to look at a published PR. Examples: '/review 26', '/review 26 --kinds=bugs,tests', '/review 26 --runs=1'."
-argument-hint: "<PR#> [--kinds=...] [--runs=N] [--tmux]"
+description: "Multi-agent PR review via Claude and/or Codex. Fans out parallel reviewers across 5 kinds (bugs, quality, architecture, tests, bulletproof) and 1 or 2 engines, aggregates with cross-engine dedup, posts a side-by-side summary table + per-kind detail comments (each finding tagged with the engine(s) that flagged it), and applies a CRITICAL label if any blocker is found. Use when the user asks to /review a PR, multi-review a PR, or wants reviewer agents to look at a published PR. Examples: '/review 26', '/review 26 --kinds=bugs,tests', '/review 26 --engine=both', '/review 26 --runs=1'."
+argument-hint: "<PR#> [--kinds=...] [--runs=N] [--engine=claude|codex|both] [--bundle DIR] [--no-post] [--tmux]"
 ---
 
 # /review skill
 
-Multi-agent PR review. For one PR, fan out parallel Claude reviewer subprocesses
-across multiple "kinds" (bugs, quality, architecture, tests, bulletproof), N
-independent runs per kind. Aggregate, dedupe, post one summary comment plus one
+Multi-agent PR review. For one PR, fan out parallel reviewer subprocesses across
+multiple "kinds" (bugs, quality, architecture, tests, bulletproof), N independent
+runs per kind per engine, using one or both of Claude and Codex. Aggregate per
+engine (deduped) and unioned across engines, post one summary comment plus one
 detail comment per kind. Apply `CRITICAL` label if any reviewer reports a blocker.
 
 ## Usage
 
 ```
-/review <PR#> [--kinds=bugs,quality,architecture,tests,bulletproof] [--runs=N] [--tmux] [--repo OWNER/NAME]
+/review <PR#> [--kinds=bugs,quality,architecture,tests,bulletproof]
+              [--runs=N] [--engine=claude|codex|both]
+              [--bundle DIR] [--no-post] [--tmux] [--repo OWNER/NAME]
 ```
 
-Defaults: `--kinds=bugs,quality,architecture,tests,bulletproof`, `--runs=3`.
-With defaults, that's 15 Claude subprocesses in parallel. Use `--runs=1` or a narrower `--kinds`
-for a cheaper pass.
+Defaults: `--kinds=bugs,quality,architecture,tests,bulletproof`, `--runs=3`, `--engine=claude`.
+With all defaults plus `--engine=both`, that's `5 × 3 × 2 = 30` subprocesses in parallel.
+Use `--runs=1` or narrower `--kinds` for a cheaper pass.
 
-`--tmux` is currently a stub (prints a note and runs without it).
+- `--engine=claude` (default) — only Claude reviewers.
+- `--engine=codex` — only Codex reviewers (faster, different lens).
+- `--engine=both` — both engines; side-by-side columns + cross-engine dedup;
+  agreement between engines is a confidence signal.
+- `--bundle DIR` — use a pre-built context bundle directory (implies `--no-post`).
+- `--no-post` — skip posting to the PR; useful for inspection / dry runs.
+- `--tmux` — stub (prints a note and runs without it).
 
 ## How to invoke
 
@@ -61,9 +70,8 @@ On disk:
 
 All prompts output the same JSON schema (see `skills/reviewer/SKILL.md`).
 
-## Out of scope
+## Out of scope (this iteration)
 
-- Codex engine (planned next iteration).
-- `/critic` (separate skill).
-- Routing to architector (separate iteration).
-- Inline file:line review comments via `gh pr review` (this iteration uses body comments only).
+- Routing to architector (label-based handoff): planned separately.
+- Inline file:line review comments via `gh pr review`: this iteration uses body
+  comments only (simpler, sufficient for the multi-agent table format).

@@ -5,6 +5,14 @@ Local-machine orchestrator for Claude Code work — drives a feature from plan �
 > **Active plan:** [ca_v1](v1_orchestrator/00-final-plan.html) · issue [a1f/claude-admin#2](https://github.com/a1f/claude-admin/issues/2)
 > **Future:** the [v2_design](v2_design/00-final-plan.html) web admin grows from the same daemon after ca_v1 ships.
 
+## Quickstart
+
+```sh
+git clone git@github.com:a1f/claude-admin.git && cd claude-admin
+./install.sh
+claude -p '/cc-help'   # prints the M1 pipeline reference (9 steps)
+```
+
 ## What this is
 
 A Rust workspace + a set of orchestrator skills. The workspace builds the runtime: a daemon that owns Claude sessions, an architector (interactive Claude session in a tmux pane) that drives one milestone, task-processors that drive one task each, and a ratatui TUI to watch it. The skills (in `skills/`) are the system prompts and helpers that those agents invoke.

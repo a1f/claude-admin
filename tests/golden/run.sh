@@ -32,7 +32,7 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
-CRITIC_RUN="${REPO_ROOT}/skills/critic-runner/scripts/run.sh"
+CRITIC_RUN="${REPO_ROOT}/skills/critic/scripts/run.sh"
 
 [[ -x "$CRITIC_RUN" ]] || die "critic runner not found at $CRITIC_RUN — build /critic first"
 command -v jq >/dev/null || die "jq required"

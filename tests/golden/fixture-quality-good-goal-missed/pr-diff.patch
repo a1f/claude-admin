@@ -1,0 +1,77 @@
+diff --git a/src/utils.py b/src/utils.py
+index e69de29..a4b8c92 100644
+--- a/src/utils.py
++++ b/src/utils.py
+@@ -0,0 +1,38 @@
++"""String utilities for the example project."""
++
++from __future__ import annotations
++
++_DEFAULT_ELLIPSIS = "…"
++
++
++def truncate(text: str, max_len: int, *, ellipsis: str = _DEFAULT_ELLIPSIS) -> str:
++    """Truncate ``text`` to at most ``max_len`` characters.
++
++    When truncation is required, an ellipsis is appended within the limit so
++    the returned string is never longer than ``max_len`` characters. The
++    ellipsis defaults to U+2026 HORIZONTAL ELLIPSIS but can be overridden
++    (for ASCII-only contexts, pass ``ellipsis="..."``).
++
++    Args:
++        text: The string to truncate.
++        max_len: Maximum allowed length of the returned string. Must be >= 0.
++        ellipsis: Marker appended when truncation occurs.
++
++    Returns:
++        The original string if ``len(text) <= max_len``; otherwise a truncated
++        copy ending in ``ellipsis``.
++
++    Raises:
++        ValueError: If ``max_len`` is negative.
++    """
++    if max_len < 0:
++        raise ValueError(f"max_len must be non-negative, got {max_len}")
++    if len(text) <= max_len:
++        return text
++    if len(ellipsis) >= max_len:
++        return ellipsis[:max_len]
++    return text[: max_len - len(ellipsis)] + ellipsis
++
++
++__all__ = ["truncate"]
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index e69de29..5c2d8e9 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -0,0 +1,29 @@
++"""Unit tests for src.utils."""
++
++from __future__ import annotations
++
++import pytest
++
++from src.utils import truncate
++
++
++def test_truncate_no_truncation_needed() -> None:
++    assert truncate("hello", 10) == "hello"
++
++
++def test_truncate_exact_length() -> None:
++    assert truncate("hello", 5) == "hello"
++
++
++def test_truncate_with_default_ellipsis() -> None:
++    result = truncate("hello world", 8)
++    assert len(result) == 8
++    assert result.endswith("…")
++
++
++def test_truncate_with_ascii_ellipsis() -> None:
++    assert truncate("hello world", 8, ellipsis="...") == "hello..."
++
++
++def test_truncate_negative_max_len_raises() -> None:
++    with pytest.raises(ValueError, match="non-negative"):
++        truncate("hi", -1)

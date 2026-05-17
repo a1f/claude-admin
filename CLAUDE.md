@@ -11,3 +11,13 @@ Before claiming any Rust coding task is complete, run and pass all of the follow
 If any command fails, do not claim completion. Fix the issues first or report that the task is still in progress.
 
 Only skip checks when the user explicitly requests that skip.
+
+## Agent skills
+
+This repo uses the mattpocock skill catalog (vendored under `skills/`). Per-repo config:
+
+- **Issue tracker** — see [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md). GitHub Issues on `a1f/claude-admin`.
+- **Triage labels** — see [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+- **Domain docs** — see [`docs/agents/domain.md`](docs/agents/domain.md). Single-context: `CONTEXT.md` + `docs/adr/` at root.
+
+M1 pipeline: `/roadmap-plan` → `/milestone` → `/to-issues` → `/architector` → `/coder` → `/review` + `/critic` → `/pr-babysit` → `/distill-lessons`. See M1 PRD: [#16](https://github.com/a1f/claude-admin/issues/16).

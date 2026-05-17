@@ -43,6 +43,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v jq      >/dev/null || die "jq required"
+command -v python3 >/dev/null || die "python3 required"
 command -v claude  >/dev/null || die "claude CLI required"
 
 # --bundle implies --no-write
@@ -66,7 +67,11 @@ else
   BUNDLE_BUILDER="${SKILL_REPO_ROOT}/scripts/build-pr-bundle.sh"
   [[ -x "$BUNDLE_BUILDER" ]] || die "expected bundle builder at $BUNDLE_BUILDER"
   log "building context bundle for PR #${PR_NUM}..."
-  BUNDLE="$("$BUNDLE_BUILDER" "$PR_NUM" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"})"
+  # build-pr-bundle.sh logs to stderr and prints the bundle path on stdout.
+  # Take the last non-empty stdout line as defensive armor against a future
+  # builder regression that prints extra stdout lines.
+  BUNDLE="$("$BUNDLE_BUILDER" "$PR_NUM" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} | awk 'NF{last=$0} END{print last}')"
+  [[ -n "$BUNDLE" && "$BUNDLE" != *$'\n'* ]] || die "bundle builder produced unexpected stdout: $BUNDLE"
   [[ -d "$BUNDLE" ]] || die "bundle builder did not produce a directory"
   log "bundle = $BUNDLE"
 fi
@@ -106,11 +111,13 @@ if [[ ! -f "$COMMENTS_FILE" && "$PR_NUM" != "offline" ]]; then
     FILTERED=$(jq '.comments' <<<"$COMMENTS_JSON")
   fi
 
+  # Cap each comment body at 8000 chars to bound prompt cost / DoS via huge
+  # comments; total file is also capped below.
   {
-    echo "# PR #${PR_NUM} — review/critic comments"
+    echo "# PR #${PR_NUM} -- review/critic comments"
     echo
-    jq -r '.[] | "## comment by @" + (.author.login // "unknown") + "\n\n" + (.body // "") + "\n"' <<<"$FILTERED"
-  } > "$COMMENTS_FILE"
+    jq -r '.[] | "## comment by @" + (.author.login // "unknown") + "\n\n" + ((.body // "") | .[0:8000]) + "\n"' <<<"$FILTERED"
+  } | head -c 200000 > "$COMMENTS_FILE"
   log "comments → $COMMENTS_FILE ($(wc -l <"$COMMENTS_FILE" | tr -d ' ') lines)"
 elif [[ ! -f "$COMMENTS_FILE" ]]; then
   warn "offline bundle missing pr-comments.md — claude will work from diff + context only"
@@ -179,6 +186,17 @@ if [[ -n "$ONLY_MODULES" ]]; then
   fi
   echo "$FILTERED_MODULES" > "$MODULES_TXT"
 fi
+
+# Defense in depth: reject any module name that could escape the modules/
+# tree on write-back. In live (PR) mode the file paths come from `gh pr view
+# --json files` which GitHub normalises; in --bundle mode the diff is
+# operator-supplied so a crafted `+++ b/skills/../../etc/x` header could
+# yield module `skills/..`.
+while IFS= read -r m; do
+  case "$m" in
+    *..*|/*|*$'\n'*|"")  die "unsafe module name derived from PR files: '$m' (refusing to continue)" ;;
+  esac
+done <"$MODULES_TXT"
 
 MODULE_COUNT=$(wc -l <"$MODULES_TXT" | tr -d ' ')
 log "modules to distill: ${MODULE_COUNT}"
@@ -282,7 +300,7 @@ the file body."
            < /dev/null \
            > "$log_out" 2> "$log_err" \
       || {
-           echo "_(distill subprocess errored — see logs/distill-${safe}.err)_" > "$log_out"
+           echo "_(distill subprocess errored -- see logs/distill-${safe}.err)_" > "$log_out"
            exit 1
          }
   ) &
@@ -296,20 +314,29 @@ done <"$MODULES_TXT"
 # ---------- 6. Wait ----------
 log "waiting for ${#PIDS[@]} distill subprocess(es)..."
 FAIL_COUNT=0
+FAILED_FLAGS=()
 for i in "${!PIDS[@]}"; do
   if wait "${PIDS[$i]}"; then
+    FAILED_FLAGS+=("0")
     log "  ${LABELS[$i]} done"
   else
+    FAILED_FLAGS+=("1")
     log "  ${LABELS[$i]} FAILED (see logs/distill-${SAFE_NAMES[$i]}.err)"
     FAIL_COUNT=$((FAIL_COUNT + 1))
   fi
 done
-[[ "$FAIL_COUNT" -gt 0 ]] && warn "${FAIL_COUNT} subprocess(es) failed; proposing only successful modules"
+[[ "$FAIL_COUNT" -gt 0 ]] && warn "${FAIL_COUNT} subprocess(es) failed; their LESSONS.md will NOT be touched"
 
 # ---------- 7. Stage proposed outputs + write back ----------
+# Output sanitisation budget. Anything past this is almost certainly the
+# distiller having gone off-script (or prompt injection from a comment), so
+# we reject rather than write.
+MAX_LESSONS_BYTES=16384
+
 UPDATED=0
 UNCHANGED=0
 EMPTY=0
+SKIPPED=0
 
 for i in "${!LABELS[@]}"; do
   module="${LABELS[$i]}"
@@ -318,19 +345,32 @@ for i in "${!LABELS[@]}"; do
   proposed="${BUNDLE}/proposed/${module}/LESSONS.md"
   mkdir -p "$(dirname "$proposed")"
 
-  # Strip leading blank lines + optional code fences claude sometimes adds.
-  # If the post-strip text is empty, write a sentinel so `proposed/` is always
-  # populated (SKILL.md promises one file per module in bundle/proposed/).
-  python3 - "$raw" "$proposed" <<'PY'
+  # Skip failed subprocesses entirely -- their `raw` holds the error stub
+  # and writing it would clobber a real LESSONS.md.
+  if [[ "${FAILED_FLAGS[$i]}" == "1" ]]; then
+    SKIPPED=$((SKIPPED + 1))
+    log "  ${module}: subprocess failed -- live LESSONS.md left untouched"
+    continue
+  fi
+
+  # Strip leading blank lines + any one outer code fence claude sometimes adds.
+  # Reject if oversized, contains raw HTML tags, or would be empty.
+  python3 - "$raw" "$proposed" "$MAX_LESSONS_BYTES" <<'PY'
 import re, sys
-src, dst = sys.argv[1], sys.argv[2]
+src, dst, max_bytes = sys.argv[1], sys.argv[2], int(sys.argv[3])
 with open(src, encoding="utf-8") as f:
     text = f.read()
 text = text.lstrip()
-m = re.match(r"^```(?:markdown|md)?\s*\n(.*?)\n```\s*$", text, flags=re.DOTALL)
+# Strip a single outer fenced block of any language.
+m = re.match(r"^```[^\n]*\n(.*?)\n```\s*$", text, flags=re.DOTALL)
 if m:
     text = m.group(1).strip() + "\n"
-if not text.strip():
+# Reject HTML escape vectors that could pivot future LLM readers.
+if re.search(r"<\s*(script|iframe|style|object|embed)\b", text, flags=re.IGNORECASE):
+    text = "_(distill rejected -- output contained raw HTML tags)_\n"
+elif len(text.encode("utf-8")) > max_bytes:
+    text = "_(distill rejected -- output exceeded {} bytes)_\n".format(max_bytes)
+elif not text.strip():
     text = "_(no lessons yet)_\n"
 elif not text.endswith("\n"):
     text += "\n"
@@ -340,20 +380,35 @@ PY
 
   proposed_size=$(wc -c <"$proposed" | tr -d ' ')
 
-  # Treat the empty-sentinel as "no rules yet" — skip write so we don't churn
-  # the live file every run.
+  # Rejected-content sentinels -> never written to live tree.
+  if grep -qE '^_\(distill rejected' "$proposed" 2>/dev/null; then
+    SKIPPED=$((SKIPPED + 1))
+    warn "  ${module}: $(cat "$proposed") -- live LESSONS.md left untouched"
+    continue
+  fi
+
+  # Empty-content sentinel -> written to bundle/proposed/ for the audit
+  # trail, but skipped from the live tree (avoid churning the file every
+  # run with the same one-line marker).
   if grep -qx '_(no lessons yet)_' "$proposed" 2>/dev/null; then
     EMPTY=$((EMPTY + 1))
-    log "  ${module}: distiller produced no rules — proposed at ${proposed} (not written)"
+    log "  ${module}: distiller produced no rules -- proposed at ${proposed} (live file not touched)"
     continue
   fi
 
   if [[ "$NO_WRITE" -eq 1 ]]; then
-    log "  ${module}: --no-write → proposed at ${proposed} (${proposed_size} bytes)"
+    log "  ${module}: --no-write -> proposed at ${proposed} (${proposed_size} bytes)"
     continue
   fi
 
   target="${REPO_ROOT}/modules/${module}/LESSONS.md"
+
+  # Belt-and-braces path-traversal check on the resolved target.
+  case "$target" in
+    "${REPO_ROOT}/modules/"*) : ;;
+    *) die "refusing to write outside modules/: $target" ;;
+  esac
+
   mkdir -p "$(dirname "$target")"
   if [[ -f "$target" ]]; then
     old_size=$(wc -c <"$target" | tr -d ' ')
@@ -366,16 +421,19 @@ PY
   else
     cp "$proposed" "$target"
     UPDATED=$((UPDATED + 1))
-    log "  ${module}: wrote ${target} (${old_size} → ${proposed_size} bytes)  proposed=${proposed}"
+    log "  ${module}: wrote ${target} (${old_size} -> ${proposed_size} bytes)  proposed=${proposed}"
   fi
 done
 
 # ---------- 8. Summary ----------
 echo "distill-lessons: done." >&2
-echo "  modules processed : ${#LABELS[@]}" >&2
-echo "  updated           : ${UPDATED}" >&2
-echo "  unchanged         : ${UNCHANGED}" >&2
-echo "  empty (skipped)   : ${EMPTY}" >&2
-echo "  failed            : ${FAIL_COUNT}" >&2
-echo "  bundle            : ${BUNDLE}" >&2
+echo "  modules processed     : ${#LABELS[@]}" >&2
+echo "  updated               : ${UPDATED}" >&2
+echo "  unchanged             : ${UNCHANGED}" >&2
+echo "  empty (audit only)    : ${EMPTY}" >&2
+echo "  skipped (fail/reject) : ${SKIPPED}" >&2
+echo "  failed                : ${FAIL_COUNT}" >&2
+echo "  bundle                : ${BUNDLE}" >&2
+# Stdout is the bundle dir (single line). All other output is on stderr so
+# the caller can pipe stdout into another tool if they want.
 echo "$BUNDLE"

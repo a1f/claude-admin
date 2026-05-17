@@ -22,4 +22,4 @@ This repo uses the mattpocock skill catalog (vendored under `skills/`). Per-repo
 
 M1 pipeline: `/roadmap-plan` → `/milestone` → `/to-issues` → `/architector` → `/coder` → `/review` + `/critic` → `/pr-babysit` → `/distill-lessons`. See M1 PRD: [#16](https://github.com/a1f/claude-admin/issues/16). Breakdown: [#17](https://github.com/a1f/claude-admin/issues/17).
 
-`/milestone` uses `/grill-me` directly (the `/grill-with-docs` variant was dropped 2026-05-17). M1 also now includes the Rust tmux runtime + daemon + sqlite (sub-slices S7a–S7g).
+`/milestone` uses `/grill-me` directly (the `/grill-with-docs` variant was dropped 2026-05-17). Programmatic tmux runtime + daemon + sqlite are M2 work; M1 is human-as-orchestrator with manual tmux + thin shell wrappers.

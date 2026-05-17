@@ -3,7 +3,7 @@ name: to-prd
 description: Turn the current conversation context into a PRD and publish it to the project issue tracker. Use when user wants to create a PRD from the current context.
 ---
 
-This skill takes the current conversation context and codebase understanding and produces a PRD. Do NOT interview the user — just synthesize what you already know.
+This skill takes the current conversation context and codebase understanding and produces a PRD with structured Deliverables / Validations / Modules sections. Do NOT interview the user — just synthesize what you already know.
 
 The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
 
@@ -11,66 +11,114 @@ The issue tracker and triage label vocabulary should have been provided to you �
 
 1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the PRD, and respect any ADRs in the area you're touching.
 
-2. Sketch out the major modules you will need to build or modify to complete the implementation. Actively look for opportunities to extract deep modules that can be tested in isolation.
+2. Sketch out the major modules you will need to build or modify. Actively look for opportunities to extract deep modules that can be tested in isolation.
 
 A deep module (as opposed to a shallow module) is one which encapsulates a lot of functionality in a simple, testable interface which rarely changes.
 
 Check with the user that these modules match their expectations. Check with the user which modules they want tests written for.
 
-3. Write the PRD using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Draft the PRD using the template below. Save the draft to a local file (e.g. `/tmp/prd-draft.md`).
+
+4. **Validate the draft before posting** — run:
+
+   ```bash
+   python3 skills/_lib/prd_validator.py /tmp/prd-draft.md
+   ```
+
+   If the validator reports errors, fix them in the draft and re-run until it passes. Do NOT post a PRD that fails validation — every check exists to prevent the downstream pipeline (architector / critic / coder) from working off an ambiguous spec.
+
+5. Publish the validated PRD to the project issue tracker (see `docs/agents/issue-tracker.md`). Apply the `ready-for-agent` triage label — no need for additional triage.
+
+## Template
+
+The PRD MUST contain exactly these 7 H2 sections, in this order:
 
 <prd-template>
 
-## Problem Statement
+## Summary
 
-The problem that the user is facing, from the user's perspective.
+One paragraph: what is being built, for whom, and why now. Use the project's domain vocabulary. No bullet points here — prose.
 
-## Solution
+## Deliverables
 
-The solution to the problem, from the user's perspective.
+Numbered, observable goals. Use this format for each:
 
-## User Stories
+- [ ] **G1** · short name
+  - observable: a concrete behavior an outside observer can verify (not "user can do X" — "running `foo` produces Y")
+  - why: one-line motivation tying back to the Summary
 
-A LONG, numbered list of user stories. Each user story should be in the format of:
+- [ ] **G2** · short name
+  - observable: ...
+  - why: ...
 
-1. As an <actor>, I want a <feature>, so that <benefit>
+Numbering MUST be sequential from G1 with no gaps. Each Gn is a unit of work that maps directly to a vertical slice in `/to-issues`.
 
-<user-story-example>
-1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending
-</user-story-example>
+## Validations
 
-This list of user stories should be extremely extensive and cover all aspects of the feature.
+Numbered validations. Each Vn MUST cite at least one Gn that it covers. Format:
 
-## Implementation Decisions
+- [ ] **V1** · _kind_ — `slug` — covers G1
+  - what: what is being validated
+  - how: how it is verified (exact command, test name, or manual procedure)
 
-A list of implementation decisions that were made. This can include:
+- [ ] **V2** · _kind_ — `slug` — covers G1, G2
+  - what: ...
+  - how: ...
 
-- The modules that will be built/modified
-- The interfaces of those modules that will be modified
-- Technical clarifications from the developer
-- Architectural decisions
-- Schema changes
-- API contracts
-- Specific interactions
+`kind` is one of `unit`, `module`, `e2e`, `manual`. Numbering MUST be sequential from V1 with no gaps. Every Gn defined above should be covered by at least one Vn (the validator does not enforce this, but `/analyze` will).
 
-Do NOT include specific file paths or code snippets. They may end up being outdated very quickly.
+## Modules to CREATE
 
-Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
+New modules introduced by this PRD. Markdown table with these columns:
 
-## Testing Decisions
+| name | path | responsibility | interface (key fns) | tests |
+|---|---|---|---|---|
+| example-module | `path/to/example.py` | one-line of what it owns | `do_thing(*, arg: int) -> Result` | V1 |
 
-A list of testing decisions that were made. Include:
+If no new modules are needed, write `_none_` as the only content of this section.
 
-- A description of what makes a good test (only test external behavior, not implementation details)
-- Which modules will be tested
-- Prior art for the tests (i.e. similar types of tests in the codebase)
+## Modules to UPDATE
 
-## Out of Scope
+Existing modules touched by this PRD. Markdown table with these columns:
 
-A description of the things that are out of scope for this PRD.
+| name | path | what changes | tests |
+|---|---|---|---|
+| existing-module | `path/to/existing.py` | brief description of the change | V2 |
 
-## Further Notes
+If nothing is being updated, write `_none_`.
 
-Any further notes about the feature.
+## Test plan
+
+Prose: what makes a good test for this work, the prior art in the codebase (similar tests to model on), and which Validations cover which modules. Tests must verify externally observable behavior, not implementation details.
+
+## Q&A
+
+Collapsible block with the grilling Q&A that produced this PRD. Use HTML `<details>` so it does not clutter the issue body by default:
+
+<details>
+<summary>Grilling Q&A</summary>
+
+Q: question text
+A: answer text
+
+Q: ...
+A: ...
+
+</details>
 
 </prd-template>
+
+## Validator contract
+
+`skills/_lib/prd_validator.py` enforces, and rejects PRDs that fail any of these:
+
+- All 7 H2 sections present (case-insensitive match on names above)
+- G numbering sequential from 1, no gaps, no duplicates
+- V numbering sequential from 1, no gaps, no duplicates
+- Every Vn block cites at least one `Gn`, and every cited `Gn` is defined in Deliverables
+- No unresolved template placeholders (`<...>` prose, `TODO`, `TBD`, `FIXME`, `XXX`)
+- Module tables well-formed: header + separator + ≥1 data row, consistent column counts. `_none_` is accepted in place of a table.
+
+The validator ignores content inside fenced code blocks (```) and inline code spans (` `` `), so example snippets and command lines can contain placeholder-looking text without tripping checks.
+
+Exit codes: `0` = valid, `1` = validation errors (printed to stderr), `2` = bad invocation (missing/wrong arguments).

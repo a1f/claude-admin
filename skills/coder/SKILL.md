@@ -1,6 +1,6 @@
 ---
 name: coder
-description: "User-invoked HITL coder-architect that ships one PR from a task spec. Use when the user runs /coder in a tmux window cd'd to a worktree, says 'be the coder for this task / PR', or invokes /coder <task-ref>. Drives a local plan.md (checkbox tasks), spawns parallel coder-worker subagents per task, runs light reviewer+critic after each commit (letter grades + CRITICAL flags), then a final 5-reviewer + 3-critic pass before pushing a NON-DRAFT ready PR. Reads MODULES.md + CLAUDE.md + per-module LESSONS.md during pre-publish self-review. Invokes /handoff when context size gets tight. NOT for headless background dispatch — that's `coder-dispatch`."
+description: "User-invoked HITL coder-architect that ships one PR from a task spec. Use when the user runs /coder in a tmux window cd'd to a worktree, says 'be the coder for this task / PR', or invokes /coder <task-ref>. Drives a local plan.md (checkbox tasks), spawns parallel coder-worker subagents per task, runs light reviewer+critic after each commit (letter grades + CRITICAL flags), then a final 5-reviewer + 3-critic pass before pushing a NON-DRAFT ready PR. Reads MODULES.md + CLAUDE.md + per-module LESSONS.md during pre-publish self-review. Invokes /handoff when context size gets tight."
 argument-hint: "<task-ref> (issue URL, issue number, plan task id, or 'describe what to do')"
 ---
 
@@ -293,7 +293,7 @@ Any section with nothing to say: `_none_`.
 
 ## Hard rules
 
-1. **Final PR is READY, not draft.** That's the whole point of this skill. The dispatched `coder-dispatch` skill opens drafts; this one does not.
+1. **Final PR is READY, not draft.** That's the whole point of this skill.
 2. **One commit per task.** Workers make small atomic commits. Squashing is optional and only at the very end (don't break history mid-flow).
 3. **Stay in scope.** If a worker tries a "while I'm here" refactor, drop the commit. No scope creep.
 4. **No force-push.** No skipping hooks (`--no-verify`). No touching the base branch directly.

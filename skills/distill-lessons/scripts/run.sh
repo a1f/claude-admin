@@ -74,7 +74,7 @@ mkdir -p "$BUNDLE/logs" "$BUNDLE/proposed"
 
 # Warn if PR isn't merged (still proceed — the skill is post-merge but the
 # user knows their workflow).
-if [[ "$PR_NUM" != "offline" && ${#REPO_ARGS[@]} -ge 0 ]]; then
+if [[ "$PR_NUM" != "offline" ]]; then
   MERGED=$(gh pr view "$PR_NUM" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --json merged -q .merged 2>/dev/null || echo "")
   if [[ "$MERGED" == "false" ]]; then
     warn "PR #${PR_NUM} is not merged yet — proceeding anyway"
@@ -94,9 +94,9 @@ if [[ ! -f "$COMMENTS_FILE" && "$PR_NUM" != "offline" ]]; then
   FILTERED=$(jq -r '
     .comments
     | map(select(
-        (.body | contains("Multi-agent review"))
-        or (.body | contains("reviewer findings"))
-        or (.body | contains("Critic verdict"))
+        ((.body // "") | contains("Multi-agent review"))
+        or ((.body // "") | contains("reviewer findings"))
+        or ((.body // "") | contains("Critic verdict"))
       ))
     | if length == 0 then null else . end
   ' <<<"$COMMENTS_JSON")
@@ -162,16 +162,18 @@ file_to_module() {
 }
 
 MODULES_TXT="${BUNDLE}/modules.txt"
-: > "$MODULES_TXT"
 while IFS= read -r f; do
   [[ -n "$f" ]] || continue
   file_to_module "$f"
-done < "$FILES_TXT" | sort -u > "$MODULES_TXT"
+done < "$FILES_TXT" | LC_ALL=C sort -u > "$MODULES_TXT"
 
-# Restrict to --modules if given.
+# Restrict to --modules if given. Trim per-element whitespace so
+# `--modules "a, b"` doesn't silently fail to match "b".
 if [[ -n "$ONLY_MODULES" ]]; then
-  REQUESTED=$(echo "$ONLY_MODULES" | tr ',' '\n' | sort -u)
-  FILTERED_MODULES=$(comm -12 "$MODULES_TXT" <(echo "$REQUESTED"))
+  REQUESTED=$(echo "$ONLY_MODULES" | tr ',' '\n' \
+              | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+              | LC_ALL=C sort -u)
+  FILTERED_MODULES=$(LC_ALL=C comm -12 "$MODULES_TXT" <(echo "$REQUESTED"))
   if [[ -z "$FILTERED_MODULES" ]]; then
     die "--modules filter '$ONLY_MODULES' matched no touched modules (touched: $(tr '\n' ',' <"$MODULES_TXT"))"
   fi
@@ -222,7 +224,7 @@ fi
 
 while IFS= read -r module; do
   [[ -n "$module" ]] || continue
-  safe=$(echo "$module" | tr '/' '__')
+  safe=$(echo "$module" | tr '/' '_')
   log_out="${BUNDLE}/logs/distill-${safe}.out"
   log_err="${BUNDLE}/logs/distill-${safe}.err"
 
@@ -279,7 +281,10 @@ the file body."
            --output-format text \
            < /dev/null \
            > "$log_out" 2> "$log_err" \
-      || echo "_(distill subprocess errored — see logs/distill-${safe}.err)_" > "$log_out"
+      || {
+           echo "_(distill subprocess errored — see logs/distill-${safe}.err)_" > "$log_out"
+           exit 1
+         }
   ) &
 
   PIDS+=("$!")
@@ -314,41 +319,54 @@ for i in "${!LABELS[@]}"; do
   mkdir -p "$(dirname "$proposed")"
 
   # Strip leading blank lines + optional code fences claude sometimes adds.
+  # If the post-strip text is empty, write a sentinel so `proposed/` is always
+  # populated (SKILL.md promises one file per module in bundle/proposed/).
   python3 - "$raw" "$proposed" <<'PY'
 import re, sys
 src, dst = sys.argv[1], sys.argv[2]
-with open(src) as f:
+with open(src, encoding="utf-8") as f:
     text = f.read()
 text = text.lstrip()
 m = re.match(r"^```(?:markdown|md)?\s*\n(.*?)\n```\s*$", text, flags=re.DOTALL)
 if m:
     text = m.group(1).strip() + "\n"
-if not text.endswith("\n"):
+if not text.strip():
+    text = "_(no lessons yet)_\n"
+elif not text.endswith("\n"):
     text += "\n"
-with open(dst, "w") as f:
+with open(dst, "w", encoding="utf-8") as f:
     f.write(text)
 PY
 
-  if [[ ! -s "$proposed" ]]; then
+  proposed_size=$(wc -c <"$proposed" | tr -d ' ')
+
+  # Treat the empty-sentinel as "no rules yet" — skip write so we don't churn
+  # the live file every run.
+  if grep -qx '_(no lessons yet)_' "$proposed" 2>/dev/null; then
     EMPTY=$((EMPTY + 1))
-    log "  ${module}: empty output — skipping"
+    log "  ${module}: distiller produced no rules — proposed at ${proposed} (not written)"
     continue
   fi
 
   if [[ "$NO_WRITE" -eq 1 ]]; then
-    log "  ${module}: --no-write → proposed at ${proposed}"
+    log "  ${module}: --no-write → proposed at ${proposed} (${proposed_size} bytes)"
     continue
   fi
 
   target="${REPO_ROOT}/modules/${module}/LESSONS.md"
   mkdir -p "$(dirname "$target")"
+  if [[ -f "$target" ]]; then
+    old_size=$(wc -c <"$target" | tr -d ' ')
+  else
+    old_size=0
+  fi
   if [[ -f "$target" ]] && cmp -s "$proposed" "$target"; then
     UNCHANGED=$((UNCHANGED + 1))
-    log "  ${module}: unchanged"
+    log "  ${module}: unchanged (${old_size} bytes)"
   else
     cp "$proposed" "$target"
     UPDATED=$((UPDATED + 1))
-    log "  ${module}: wrote ${target} ($(wc -c <"$target" | tr -d ' ') bytes)"
+    log "  ${module}: wrote ${target} (${old_size} → ${proposed_size} bytes)  proposed=${proposed}"
   fi
 done
 

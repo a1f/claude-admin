@@ -5,5 +5,5 @@
 __pycache__/
 *.pyc
 
-# Local Claude Code state
+# Local-only Claude Code config (gates, settings, etc.) — keep out of the repo
 .claude/

@@ -1,0 +1,42 @@
+diff --git a/src/utils.py b/src/utils.py
+index e69de29..2b1f4c8 100644
+--- a/src/utils.py
++++ b/src/utils.py
+@@ -0,0 +1,18 @@
++import re
++
++def s(x):
++    # slugify lol
++    y = ""
++    for c in x.lower():
++        if c.isalnum():
++            y += c
++        else:
++            y += "-"
++    # collapse runs of -
++    while "--" in y:
++        y = y.replace("--", "-")
++    if y.startswith("-"): y = y[1:]
++    if y.endswith("-"): y = y[:-1]
++    return y
++
++slugify = s
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index e69de29..7d3c1ab 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -0,0 +1,14 @@
++from src.utils import slugify
++
++def test_slugify_empty():
++    assert slugify("") == ""
++
++def test_slugify_single_word():
++    assert slugify("hello") == "hello"
++
++def test_slugify_multi_word():
++    assert slugify("Hello World") == "hello-world"
++
++def test_slugify_special_chars():
++    assert slugify("  multi   spaces  ") == "multi-spaces"
++    assert slugify("---weird___chars???") == "weird-chars"

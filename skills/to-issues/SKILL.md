@@ -31,7 +31,7 @@ Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an
 - Prefer many thin slices over few thick ones
 </vertical-slice-rules>
 
-For each slice, draft the following fields (these are the same fields rendered into the published issue body in step 7):
+For each slice, draft these fields (same fields rendered into the published issue body in step 6):
 
 <slice-draft-template>
 - **Title** — short descriptive name, prefixed with the slice id (e.g. `S5 · /to-issues + enrichment`)
@@ -40,7 +40,7 @@ For each slice, draft the following fields (these are the same fields rendered i
 - **E2E covered** — which end-to-end validations (Vn in the PRD, kind `_e2e_`) this slice exercises. May be empty.
 - **Module-test** — which module-level validations (Vn in the PRD, kind `_module_`) this slice exercises. May be empty.
 - **Definition of done** — checkbox list combining (a) slice-specific acceptance criteria and (b) the named validations from the two fields above. Each item must be independently verifiable.
-- **Modules touched** — module names this slice creates or updates (used by the enrichment phase to look up matrix rows and `modules/<name>/LESSONS.md`).
+- **Modules touched** — module names this slice creates or updates (used by the enrichment step to look up matrix rows and `modules/<name>/LESSONS.md`).
 - **Blocked by** — other slice ids that must merge first, or "None".
 - **User stories covered** — if the source material has them, which user stories this addresses.
 </slice-draft-template>
@@ -58,55 +58,33 @@ Ask the user:
 
 Iterate until the user approves the breakdown.
 
-### 5. Enrich each slice (before publish)
+### 5. Enrich each slice, then fidelity-critique (before publish)
 
-For each approved slice, **enrich** the draft body with inlined context so the downstream coder starts pre-loaded (BMAD SM-compiler pattern, PRD #16 G5). Enrichment is mechanical, not creative: it copies excerpts from upstream artifacts into the slice body so the coder does not need to re-fetch them.
+Enrich each approved slice with inlined context so the downstream coder starts pre-loaded (BMAD SM-compiler pattern, PRD #16 G5). Enrichment is **mechanical, not creative** — copy excerpts from upstream artifacts into the slice body so the coder does not need to re-fetch them.
 
-The canonical implementation is `skills/_lib/slice_enricher.py`:
+For each slice, append a `## Context (enriched)` block with three sub-sections:
 
-```python
-from slice_enricher import enrich
+1. **PRD excerpts** — for each `Vn` the slice cites in **E2E covered** or **Module-test**, look up which `Gn`s that validation covers (from the PRD's `## validations` section), then copy the verbatim `Gn` block(s) from the PRD's `## deliverables` section. Wrap each in `<details><summary>Gn · title</summary> ... </details>` so the issue stays scannable. If a slice has no validations, render `_No matching PRD deliverables found._`.
 
-body = enrich(
-    slice_draft,       # dict with the fields from the <slice-draft-template>
-    prd,               # full PRD markdown body (string)
-    modules_md="",     # optional extra module-impact-matrix markdown
-    lessons=lessons,   # optional dict {module_name: LESSONS.md body}
-)
-```
+2. **Module-impact matrix** — from the PRD's `## modules to CREATE` and `## modules to UPDATE` tables, copy any rows whose `name` (or a path segment) exactly matches an entry in **Modules touched**. Render as a single table with a `section` column tagging each row (`CREATE` / `UPDATE`). Match by exact name or path segment only — substring matching pairs `"foo"` with `foobar.py`. If no rows match, render `_No matching module rows._`.
 
-For each slice, the enricher produces a `## Context (enriched)` block containing three sub-sections:
+3. **Neighbouring lessons** — for each module in **Modules touched**, if `modules/<name>/LESSONS.md` exists, read it and inline its body inside `<details><summary>modules/<name>/LESSONS.md</summary> ... </details>`. Skip silently when the file is missing. If none exist, render `_No neighbouring LESSONS.md provided._`.
 
-1. **PRD excerpts** — the verbatim Gn block(s) the slice's validations cover, lifted from the PRD's `## deliverables` section. Wrapped in `<details>` so the issue stays scannable.
-2. **Module-impact matrix** — rows from the PRD's `## modules to CREATE` / `## modules to UPDATE` tables whose `name` or path segment matches an entry in the slice's **Modules touched** field. The rendered table tags each row with its source section (CREATE / UPDATE).
-3. **Neighbouring lessons** — the body of `modules/<name>/LESSONS.md` for each module in **Modules touched**, when the file exists. Caller responsibility: read each file from disk into the `lessons` dict before calling `enrich()`; skip silently if the file is missing.
-
-If the script is unavailable (e.g. running in pure-prompt mode), construct the same three sub-sections by hand using the rules above. The published slice body must contain the `## Context (enriched)` heading either way.
-
-### 6. Fidelity critique (3 rounds)
-
-Run an automated fidelity critique **between enrichment and publish**. The critique converges fast and lets you publish without re-asking the user; if it cannot converge in 3 rounds, escalate.
-
-Each round:
-
-1. If the `/analyze` skill is available, invoke it on `(PRD, enriched slice bodies)` and read its structured drift report.
-2. Otherwise, run the inline structural self-check below.
-3. Apply any fixes the round produces. Re-enrich slices whose Modules touched / validations changed.
-4. Stop early if the round produces **zero findings**.
-
-After round 3, if findings remain, surface them to the user and wait for direction. Do not publish until either (a) a round produced zero findings, or (b) the user explicitly acknowledged the residual findings.
+After enriching, run a **fidelity critique** as a structural self-check. Up to 3 rounds; stop as soon as a round produces zero findings.
 
 <inline-structural-self-check>
 - **PRD coverage**: every `Gn` in the PRD's `## deliverables` section appears in at least one slice's PRD excerpts. Missing Gs → either add a slice or surface the gap.
-- **Validation coverage**: every `Vn` in the PRD's `## validations` section appears in at least one slice's **E2E covered** or **Module-test** field. Missing Vs → assign to a slice or surface the gap.
+- **Validation coverage**: every `Vn` in the PRD's `## validations` section appears in at least one slice's **E2E covered** or **Module-test**. Missing Vs → assign to a slice or surface the gap.
 - **Backreference integrity**: every `Vn` a slice claims to cover exists in the PRD. Every `Gn` referenced via a cited V also exists in the PRD.
-- **Definition-of-done completeness**: each slice's Definition of done includes one checkbox per cited V (the enricher does this automatically; verify it).
-- **Module-matrix integrity**: every module name in a slice's **Modules touched** resolves to at least one matrix row (in the PRD or the supplied `modules_md`), OR the slice notes in **Notes** why no matrix row exists yet.
+- **Definition-of-done completeness**: each slice's Definition of done includes one checkbox per cited V.
+- **Module-matrix integrity**: every module name in **Modules touched** resolves to at least one matrix row, OR the slice notes why no matrix row exists yet.
 - **No empty enrichments**: no slice has all three Context sub-sections rendered as `_None._` / `_No matching ..._`. If it does, the slice is mis-tagged — fix its Modules touched / validations.
 - **Dependency sanity**: every slice listed in any other slice's **Blocked by** exists in the breakdown and is published before its dependents.
 </inline-structural-self-check>
 
-### 7. Publish the issues to the issue tracker
+Apply fixes inline. Re-enrich slices whose **Modules touched** or validations changed. After round 3, if findings remain, surface them to the user and wait for direction before publishing.
+
+### 6. Publish the issues to the issue tracker
 
 For each approved-and-critiqued slice, publish a new issue to the issue tracker. Use the issue body template below. These issues are considered ready for AFK agents, so publish them with the correct triage label unless instructed otherwise.
 

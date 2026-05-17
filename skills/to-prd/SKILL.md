@@ -19,23 +19,15 @@ Check with the user that these modules match their expectations. Check with the 
 
 3. Draft the PRD using the template below. Save the draft to a local file (e.g. `/tmp/prd-draft.md`).
 
-4. **Validate the draft before posting** — run:
-
-   ```bash
-   python3 skills/_lib/prd_validator.py /tmp/prd-draft.md
-   ```
-
-   If the validator reports errors, fix them in the draft and re-run until it passes. Do NOT post a PRD that fails validation — every check exists to prevent the downstream pipeline (architector / critic / coder) from working off an ambiguous spec.
-
-5. **Critique the draft** — dispatch the 3 agents below in parallel (single message, 3 Agent tool calls). Each returns a score 1-100 and a short list of concrete fixes. If any score is < 80, apply the fixes and re-critique. Do NOT publish until all three score ≥ 80.
+4. **Critique the draft** — dispatch the 3 agents below in parallel (single message, 3 Agent tool calls). Each returns a score 1-100 and a short list of concrete fixes. If any score is < 80, apply the fixes and re-critique. Do NOT publish until all three score ≥ 80.
 
    Each agent receives: the draft PRD, the original user prompt that started this conversation, and the Q&A transcript from the grilling step (paste them verbatim into the prompt).
 
    - **Agent A — prompt fidelity.** Does the PRD actually deliver what the user asked for in the original prompt? Score 1-100. List anything in the prompt that is missing, watered down, or silently expanded.
    - **Agent B — Q&A fidelity.** Does the PRD reflect every decision made in the Q&A? Score 1-100. List any Q&A answer that is contradicted, ignored, or only partially honored.
-   - **Agent C — structure & vertical slicing.** Are Deliverables observable, Validations tied to Gn, Modules concrete, Test plan substantive, and is each Gn a real vertical slice (not a horizontal layer)? Score 1-100. List structural weaknesses.
+   - **Agent C — structure & vertical slicing.** Confirm all 7 H2 sections are present and in order (Summary, Deliverables, Validations, Modules to CREATE, Modules to UPDATE, Test plan, Q&A); G/V numbered sequentially from 1 with no gaps; every Vn cites a defined Gn; module tables well-formed or `_none_`; no unresolved `<...>` / `TODO` / `TBD` placeholders. Then judge: are Deliverables observable, Modules concrete, Test plan substantive, and is each Gn a real vertical slice (not a horizontal layer)? Score 1-100. List structural weaknesses.
 
-6. Publish the validated and critiqued PRD to the project issue tracker (see `docs/agents/issue-tracker.md`). Apply the `ready-for-agent` triage label — no need for additional triage.
+5. Publish the critiqued PRD to the project issue tracker (see `docs/agents/issue-tracker.md`). Apply the `ready-for-agent` triage label — no need for additional triage.
 
 ## Template
 
@@ -116,17 +108,3 @@ A: ...
 
 </prd-template>
 
-## Validator contract
-
-`skills/_lib/prd_validator.py` enforces, and rejects PRDs that fail any of these:
-
-- All 7 H2 sections present (case-insensitive match on names above)
-- G numbering sequential from 1, no gaps, no duplicates
-- V numbering sequential from 1, no gaps, no duplicates
-- Every Vn block cites at least one `Gn`, and every cited `Gn` is defined in Deliverables
-- No unresolved template placeholders (`<...>` prose, `TODO`, `TBD`, `FIXME`, `XXX`)
-- Module tables well-formed: header + separator + ≥1 data row, consistent column counts. `_none_` is accepted in place of a table.
-
-The validator ignores content inside fenced code blocks (```) and inline code spans (` `` `), so example snippets and command lines can contain placeholder-looking text without tripping checks.
-
-Exit codes: `0` = valid, `1` = validation errors (printed to stderr), `2` = bad invocation (missing/wrong arguments).

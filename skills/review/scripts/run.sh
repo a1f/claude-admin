@@ -113,6 +113,7 @@ This is run ${run} of ${RUNS} for this kind — run independently. Score what YO
       claude -p "$user_prompt" \
              --append-system-prompt "$(cat "$prompt_file")" \
              --output-format text \
+             < /dev/null \
              > "$log" 2> "$err" \
         || echo "{\"kind\":\"${kind}\",\"summary\":\"reviewer subprocess errored\",\"findings\":[],\"_error\":true}" > "$log"
     ) &

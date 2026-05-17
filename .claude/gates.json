@@ -1,0 +1,19 @@
+{
+  "_comment": "Generated from .github/workflows/ci.yml — keep in sync with that file. Used by /make-pr (and any deterministic gate runner).",
+  "gates": [
+    {
+      "name": "fmt-check",
+      "run": "cargo fmt-check",
+      "fix": "cargo fmt-fix"
+    },
+    {
+      "name": "lint-strict",
+      "run": "cargo lint-strict",
+      "fix": "cargo lint-fix"
+    },
+    {
+      "name": "test",
+      "run": "cargo test --workspace --all-targets"
+    }
+  ]
+}

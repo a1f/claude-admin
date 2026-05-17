@@ -1,44 +1,62 @@
 #!/usr/bin/env python3
-"""Aggregate critic JSONL outputs into a summary verdict + comment body.
-
-Inputs:
-  --bundle DIR  bundle directory containing logs/<engine>-critic-<run>.jsonl
-  --pr ID       PR identifier (used in headers; can be "offline" for fixtures)
-  --runs N      runs per engine (informational)
-  --engines CSV one or more engines: "claude", "codex", or "claude,codex"
-
-Outputs (written into the bundle dir):
-  summary.md    markdown comment body (gets posted to the PR)
-  summary.json  machine-readable verdict:
-    {
-      "pr": ..., "engines": ["claude", "codex"], "runs_per_engine": N,
-      "score": <int>,           # consensus median across all engines × runs
-      "verdict": "strong|acceptable|weak|reject",
-      "axes": {<axis>: <median>, ...},
-      "rationale": "<representative rationale>",
-      "concerns": ["<unioned, deduped>"],
-      "per_engine": {
-        "<engine>": { "runs_used": N, "runs_errored": N, "score": <median>,
-                      "verdict": "...", "axes": {...},
-                      "per_run": [ {score, verdict, axes, ...}, ... ] }
-      }
-    }
-
-Verdict derivation is by median score (deterministic), matching the
-skill's own rubric thresholds.
-"""
-
-from __future__ import annotations
+"""Aggregate critic JSONL outputs into per-engine medians, consensus, and a markdown comment body."""
 
 import argparse
 import hashlib
 import json
 import statistics
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Final
 
-AXES = ["achieves_goal", "test_coverage", "no_scope_creep", "reuses_existing", "validation_evidence"]
-VERDICT_ORDER = ["reject", "weak", "acceptable", "strong"]
+AXES: Final[tuple[str, ...]] = (
+    "achieves_goal",
+    "test_coverage",
+    "no_scope_creep",
+    "reuses_existing",
+    "validation_evidence",
+)
+VERDICTS: Final[tuple[str, ...]] = ("reject", "weak", "acceptable", "strong")
+VERDICT_EMOJI: Final[dict[str, str]] = {
+    "strong": "✅",
+    "acceptable": "✅",
+    "weak": "⚠️",
+    "reject": "🛑",
+}
+ENGINE_LABEL: Final[dict[str, str]] = {"claude": "Claude", "codex": "Codex"}
+
+
+@dataclass(frozen=True, slots=True)
+class CriticRun:
+    score: int
+    verdict: str
+    axes: dict[str, int]
+    rationale_md: str
+    concerns: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EngineResult:
+    runs: tuple[CriticRun, ...]
+    errored: int
+    score: int
+    verdict: str
+    axes: dict[str, int]
+    rationale: str
+
+    @property
+    def runs_used(self) -> int:
+        return len(self.runs)
+
+
+@dataclass(frozen=True, slots=True)
+class Consensus:
+    score: int
+    verdict: str
+    axes: dict[str, int]
+    rationale: str
+    concerns: tuple[str, ...]
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,7 +68,8 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def extract_json(text: str) -> dict | None:
+def extract_json(*, text: str) -> dict | None:
+    """Claude/Codex sometimes wrap JSON in markdown fences; scan for the first balanced object."""
     start = text.find("{")
     if start == -1:
         return None
@@ -81,26 +100,39 @@ def extract_json(text: str) -> dict | None:
     return None
 
 
-def load_run(log_path: Path) -> dict | None:
+def load_run(*, log_path: Path) -> CriticRun | None:
     if not log_path.exists() or log_path.stat().st_size == 0:
         return None
-    obj = extract_json(log_path.read_text(errors="replace"))
-    if obj is None:
+    obj = extract_json(text=log_path.read_text(errors="replace"))
+    if obj is None or obj.get("_error"):
         return None
-    if not isinstance(obj.get("axes"), dict):
-        obj["axes"] = {}
-    if not isinstance(obj.get("concerns"), list):
-        obj["concerns"] = []
     try:
-        obj["score"] = int(obj.get("score", 0))
+        score = int(obj.get("score", 0))
     except (TypeError, ValueError):
-        obj["score"] = 0
-    if obj.get("verdict") not in VERDICT_ORDER:
-        obj["verdict"] = "reject"
-    return obj
+        score = 0
+    verdict = obj.get("verdict")
+    if verdict not in VERDICTS:
+        verdict = "reject"
+    raw_axes = obj.get("axes") if isinstance(obj.get("axes"), dict) else {}
+    raw_concerns = obj.get("concerns") if isinstance(obj.get("concerns"), list) else []
+    return CriticRun(
+        score=score,
+        verdict=verdict,
+        axes={a: _safe_int(raw_axes.get(a, 0)) for a in AXES},
+        rationale_md=str(obj.get("rationale_md", "")).strip(),
+        concerns=tuple(str(c) for c in raw_concerns),
+    )
 
 
-def verdict_from_score(score: int) -> str:
+def _safe_int(value: object) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
+def verdict_from_score(*, score: int) -> str:
+    """Map a score to the skill's own verdict bucket."""
     if score >= 85:
         return "strong"
     if score >= 70:
@@ -110,180 +142,177 @@ def verdict_from_score(score: int) -> str:
     return "reject"
 
 
-def median_int(values: list[int]) -> int:
+def median_int(*, values: list[int]) -> int:
     if not values:
         return 0
     return int(round(statistics.median(values)))
 
 
-def dedup_concerns(runs: list[dict]) -> list[str]:
+def dedup_concerns(*, runs: list[CriticRun]) -> tuple[str, ...]:
+    """First 120 chars (case-insensitive) define the dedup key — preserves the original casing of the first occurrence."""
     seen: dict[str, str] = {}
     for run in runs:
-        for c in run.get("concerns", []):
-            text = str(c).strip()
+        for raw in run.concerns:
+            text = raw.strip()
             if not text:
                 continue
             key = hashlib.sha1(text[:120].lower().encode()).hexdigest()[:10]
-            if key not in seen:
-                seen[key] = text
-    return list(seen.values())
+            seen.setdefault(key, text)
+    return tuple(seen.values())
 
 
-def representative_rationale(runs: list[dict], median_score: int) -> str:
+def representative_rationale(*, runs: list[CriticRun], median_score: int) -> str:
+    """Pick the rationale whose score is closest to the median (ties broken by higher score)."""
     if not runs:
         return ""
-    chosen = min(runs, key=lambda r: (abs(r["score"] - median_score), -r["score"]))
-    return str(chosen.get("rationale_md", "")).strip()
+    chosen = min(runs, key=lambda r: (abs(r.score - median_score), -r.score))
+    return chosen.rationale_md
 
 
-def aggregate_engine(bundle: Path, engine: str, runs_planned: int) -> dict:
-    """Aggregate runs for one engine."""
-    per_run: list[dict] = []
+def aggregate_engine(*, bundle: Path, engine: str, runs_planned: int) -> EngineResult:
+    runs: list[CriticRun] = []
     errored = 0
     for r in range(1, runs_planned + 1):
-        log = bundle / "logs" / f"{engine}-critic-{r}.jsonl"
-        obj = load_run(log)
-        if obj is None:
+        loaded = load_run(log_path=bundle / "logs" / f"{engine}-critic-{r}.jsonl")
+        if loaded is None:
             errored += 1
-            continue
-        if obj.get("_error"):
-            errored += 1
-            continue
-        per_run.append(obj)
+        else:
+            runs.append(loaded)
 
-    if not per_run:
-        return {
-            "runs_used": 0,
-            "runs_errored": errored,
-            "score": 0,
-            "verdict": "reject",
-            "axes": {a: 0 for a in AXES},
-            "rationale": "All runs failed.",
-            "per_run": per_run,
-        }
+    if not runs:
+        return EngineResult(
+            runs=(),
+            errored=errored,
+            score=0,
+            verdict="reject",
+            axes={a: 0 for a in AXES},
+            rationale="All runs failed.",
+        )
 
-    median_score = median_int([r["score"] for r in per_run])
-    median_axes = {
-        a: median_int([int(r["axes"].get(a, 0) or 0) for r in per_run]) for a in AXES
-    }
-    return {
-        "runs_used": len(per_run),
-        "runs_errored": errored,
-        "score": median_score,
-        "verdict": verdict_from_score(median_score),
-        "axes": median_axes,
-        "rationale": representative_rationale(per_run, median_score),
-        "per_run": per_run,
-    }
+    score = median_int(values=[r.score for r in runs])
+    axes = {a: median_int(values=[r.axes[a] for r in runs]) for a in AXES}
+    return EngineResult(
+        runs=tuple(runs),
+        errored=errored,
+        score=score,
+        verdict=verdict_from_score(score=score),
+        axes=axes,
+        rationale=representative_rationale(runs=runs, median_score=score),
+    )
 
 
-def aggregate_consensus(per_engine: dict[str, dict]) -> dict:
-    """Combine per-engine results into a consensus across all runs."""
-    all_runs: list[dict] = []
-    for eng_data in per_engine.values():
-        all_runs.extend(eng_data["per_run"])
+def aggregate_consensus(*, per_engine: dict[str, EngineResult]) -> Consensus:
+    all_runs: list[CriticRun] = []
+    for er in per_engine.values():
+        all_runs.extend(er.runs)
 
     if not all_runs:
-        return {
-            "score": 0,
-            "verdict": "reject",
-            "axes": {a: 0 for a in AXES},
-            "rationale": "All critic runs failed.",
-            "concerns": [],
-        }
+        return Consensus(
+            score=0,
+            verdict="reject",
+            axes={a: 0 for a in AXES},
+            rationale="All critic runs failed.",
+            concerns=(),
+        )
 
-    median_score = median_int([r["score"] for r in all_runs])
-    median_axes = {
-        a: median_int([int(r["axes"].get(a, 0) or 0) for r in all_runs]) for a in AXES
-    }
-    return {
-        "score": median_score,
-        "verdict": verdict_from_score(median_score),
-        "axes": median_axes,
-        "rationale": representative_rationale(all_runs, median_score),
-        "concerns": dedup_concerns(all_runs),
-    }
-
-
-VERDICT_EMOJI = {"strong": "✅", "acceptable": "✅", "weak": "⚠️", "reject": "🛑"}
-ENGINE_LABEL = {"claude": "Claude", "codex": "Codex"}
+    score = median_int(values=[r.score for r in all_runs])
+    axes = {a: median_int(values=[r.axes[a] for r in all_runs]) for a in AXES}
+    return Consensus(
+        score=score,
+        verdict=verdict_from_score(score=score),
+        axes=axes,
+        rationale=representative_rationale(runs=all_runs, median_score=score),
+        concerns=dedup_concerns(runs=all_runs),
+    )
 
 
 def render_md(
+    *,
     pr: str,
-    consensus: dict,
-    per_engine: dict[str, dict],
+    consensus: Consensus,
+    per_engine: dict[str, EngineResult],
     engines: list[str],
     runs_planned: int,
 ) -> str:
-    lines: list[str] = []
-    lines.append(f"## 🎯 Critic verdict — PR #{pr}")
-    lines.append("")
     eng_label = " + ".join(ENGINE_LABEL.get(e, e) for e in engines)
-    lines.append(
-        f"_{eng_label} critic, {runs_planned} run(s) per engine. "
-        "Goal-fit only — code quality is /cc-review's job._"
-    )
-    lines.append("")
-    emoji = VERDICT_EMOJI.get(consensus["verdict"], "·")
-    lines.append(
-        f"### {emoji} **{consensus['verdict'].upper()}** — consensus score {consensus['score']}/100"
-    )
-    lines.append("")
+    emoji = VERDICT_EMOJI.get(consensus.verdict, "·")
+    multi_engine = len(engines) > 1
+    max_runs = max((per_engine[e].runs_used for e in engines), default=0)
+    total_errored = sum(per_engine[e].errored for e in engines)
 
-    # Per-engine table (only if more than one engine, otherwise it's redundant)
-    if len(engines) >= 1:
-        lines.append("### Scores per engine")
-        lines.append("")
-        # Build header dynamically for up to N runs
-        max_runs = max((len(per_engine[e]["per_run"]) for e in engines), default=0)
-        run_headers = " | ".join(f"r{i+1}" for i in range(max_runs)) if max_runs else "—"
-        lines.append(f"| Engine | runs | {run_headers} | median | verdict |")
-        lines.append("|--------|------|" + "|".join("------" for _ in range(max_runs)) + "|--------|---------|")
-        for e in engines:
-            ed = per_engine[e]
-            label = ENGINE_LABEL.get(e, e)
-            run_scores = [str(r["score"]) for r in ed["per_run"]]
-            run_scores += ["—"] * (max_runs - len(run_scores))
-            lines.append(
-                f"| {label} | {ed['runs_used']}/{runs_planned} | "
-                f"{' | '.join(run_scores)} | **{ed['score']}** | {ed['verdict']} |"
-            )
-        if len(engines) > 1:
-            lines.append(
-                "| **Consensus** | | "
-                + " | ".join("" for _ in range(max_runs))
-                + f" | **{consensus['score']}** | **{consensus['verdict']}** |"
-            )
-        lines.append("")
+    lines: list[str] = [
+        f"## 🎯 Critic verdict — PR #{pr}",
+        "",
+        f"_{eng_label} critic, {runs_planned} run(s) per engine. "
+        "Goal-fit only — code quality is /cc-review's job._",
+        "",
+        f"### {emoji} **{consensus.verdict.upper()}** — consensus score {consensus.score}/100",
+        "",
+    ]
+
+    lines.append("### Scores per engine")
+    lines.append("")
+    run_headers = " | ".join(f"r{i + 1}" for i in range(max_runs)) if max_runs else "—"
+    lines.append(f"| Engine | runs | {run_headers} | median | verdict |")
+    lines.append("|--------|------|" + "|".join("------" for _ in range(max_runs)) + "|--------|---------|")
+    for e in engines:
+        er = per_engine[e]
+        label = ENGINE_LABEL.get(e, e)
+        run_scores = [str(r.score) for r in er.runs] + ["—"] * (max_runs - er.runs_used)
+        lines.append(
+            f"| {label} | {er.runs_used}/{runs_planned} | "
+            f"{' | '.join(run_scores)} | **{er.score}** | {er.verdict} |"
+        )
+    if multi_engine:
+        empty_cells = " | ".join("" for _ in range(max_runs))
+        lines.append(
+            f"| **Consensus** | | {empty_cells} | **{consensus.score}** | **{consensus.verdict}** |"
+        )
+    lines.append("")
 
     lines.append("### Axes (consensus median 0–100)")
     lines.append("")
     lines.append("| Axis | Score |")
     lines.append("|------|-------|")
-    for a in AXES:
-        lines.append(f"| `{a}` | {consensus['axes'].get(a, 0)} |")
+    lines.extend(f"| `{a}` | {consensus.axes[a]} |" for a in AXES)
     lines.append("")
 
-    if consensus["rationale"]:
-        lines.append("### Rationale (representative run)")
-        lines.append("")
-        lines.append(consensus["rationale"])
-        lines.append("")
+    if consensus.rationale:
+        lines.extend(("### Rationale (representative run)", "", consensus.rationale, ""))
 
-    if consensus["concerns"]:
+    if consensus.concerns:
         lines.append("### Concerns (union across runs and engines)")
         lines.append("")
-        for c in consensus["concerns"]:
-            lines.append(f"- {c}")
+        lines.extend(f"- {c}" for c in consensus.concerns)
         lines.append("")
 
-    total_errored = sum(per_engine[e]["runs_errored"] for e in engines)
     if total_errored > 0:
         lines.append(f"_⚠ {total_errored} critic run(s) failed or produced unparseable output._")
         lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+def serialize_run(*, run: CriticRun) -> dict:
+    """JSON shape must stay backward-compatible with downstream readers (run.sh, golden tests)."""
+    return {
+        "score": run.score,
+        "verdict": run.verdict,
+        "axes": dict(run.axes),
+        "rationale_md": run.rationale_md,
+        "concerns": list(run.concerns),
+    }
+
+
+def serialize_engine(*, engine_result: EngineResult, runs_planned: int) -> dict:
+    return {
+        "runs_used": engine_result.runs_used,
+        "runs_errored": engine_result.errored,
+        "score": engine_result.score,
+        "verdict": engine_result.verdict,
+        "axes": dict(engine_result.axes),
+        "per_run": [serialize_run(run=r) for r in engine_result.runs],
+    }
 
 
 def main() -> int:
@@ -298,13 +327,19 @@ def main() -> int:
         print("aggregate: --engines is empty", file=sys.stderr)
         return 1
 
-    per_engine = {e: aggregate_engine(bundle, e, args.runs) for e in engines}
-    consensus = aggregate_consensus(per_engine)
+    per_engine = {e: aggregate_engine(bundle=bundle, engine=e, runs_planned=args.runs) for e in engines}
+    consensus = aggregate_consensus(per_engine=per_engine)
+    total_runs_used = sum(per_engine[e].runs_used for e in engines)
 
     (bundle / "summary.md").write_text(
-        render_md(args.pr, consensus, per_engine, engines, args.runs)
+        render_md(
+            pr=args.pr,
+            consensus=consensus,
+            per_engine=per_engine,
+            engines=engines,
+            runs_planned=args.runs,
+        )
     )
-    total_runs_used = sum(per_engine[e]["runs_used"] for e in engines)
     (bundle / "summary.json").write_text(
         json.dumps(
             {
@@ -312,20 +347,13 @@ def main() -> int:
                 "engines": engines,
                 "runs_per_engine": args.runs,
                 "runs_used": total_runs_used,
-                "score": consensus["score"],
-                "verdict": consensus["verdict"],
-                "axes": consensus["axes"],
-                "rationale": consensus["rationale"],
-                "concerns": consensus["concerns"],
+                "score": consensus.score,
+                "verdict": consensus.verdict,
+                "axes": dict(consensus.axes),
+                "rationale": consensus.rationale,
+                "concerns": list(consensus.concerns),
                 "per_engine": {
-                    e: {
-                        "runs_used": per_engine[e]["runs_used"],
-                        "runs_errored": per_engine[e]["runs_errored"],
-                        "score": per_engine[e]["score"],
-                        "verdict": per_engine[e]["verdict"],
-                        "axes": per_engine[e]["axes"],
-                        "per_run": per_engine[e]["per_run"],
-                    }
+                    e: serialize_engine(engine_result=per_engine[e], runs_planned=args.runs)
                     for e in engines
                 },
             },
@@ -333,8 +361,7 @@ def main() -> int:
         )
     )
     print(
-        f"aggregate: engines={','.join(engines)} score={consensus['score']} "
-        f"verdict={consensus['verdict']}",
+        f"aggregate: engines={','.join(engines)} score={consensus.score} verdict={consensus.verdict}",
         file=sys.stderr,
     )
     return 0

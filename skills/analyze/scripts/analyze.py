@@ -1,31 +1,13 @@
 #!/usr/bin/env python3
-"""analyze.py - cross-artifact consistency gate for the M1 skills pipeline.
-
-Reads a set of artifacts (roadmap, PRD, slice list, PR table), parses them
-into a normalized model, and reports three classes of issues:
-
-  - missing-coverage   PRD goal/validation with no slice covering it
-  - drift              slice/PR references a Gn/Vn/Sn that doesn't exist
-  - inconsistencies    numbering gaps, dangling V->G refs, etc.
-
-Determinism: pure parser, no LLM call, output sorted -> same inputs yield
-byte-identical reports. Safe to call repeatedly from /to-prd, /to-issues,
-/architector critique loops.
+"""Cross-artifact consistency gate for the M1 skills pipeline.
 
 CLI:
     python3 analyze.py [--prd REF] [--slices REF]
                        [--pr-table REF] [--roadmap REF]
                        [--format markdown|json]
 
-Each REF is one of:
-  - a local file path
-  - "gh:OWNER/REPO#N"           (fetched via `gh issue view N --repo OWNER/REPO`)
-  - "https://github.com/OWNER/REPO/issues/N"
-
-Exit codes:
-    0  clean (no issues)
-    1  issues reported
-    2  argument / fetch error
+REF is a local path, "gh:OWNER/REPO#N", or a full GitHub issue URL.
+Exit codes: 0 clean, 1 issues reported, 2 argument/fetch error.
 """
 
 from __future__ import annotations
@@ -38,6 +20,22 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from re import Pattern
+from typing import Final
+
+
+# --- Exceptions ----------------------------------------------------------
+
+
+class AnalyzeError(Exception):
+    """Base for /analyze errors."""
+
+
+class ArtifactFetchError(AnalyzeError):
+    """Failed to fetch an artifact by ref."""
+
+
+# --- Types ---------------------------------------------------------------
 
 
 class Kind(str, Enum):
@@ -47,23 +45,20 @@ class Kind(str, Enum):
     PR_TABLE = "pr_table"
 
 
-# --- Data model ---------------------------------------------------------
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Goal:
     id: str
     title: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Validation:
     id: str
     title: str
     covers: tuple[str, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Slice:
     id: str
     title: str
@@ -72,13 +67,13 @@ class Slice:
     status: str | None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PRRow:
     id: str
     slice_id: str | None
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AnalyzeReport:
     missing_coverage: list[str] = field(default_factory=list)
     drift: list[str] = field(default_factory=list)
@@ -88,57 +83,63 @@ class AnalyzeReport:
         return not (self.missing_coverage or self.drift or self.inconsistencies)
 
     def to_markdown(self) -> str:
-        def section(title: str, items: list[str]) -> str:
-            if not items:
-                return f"### {title}\n_(none)_\n"
-            body = "\n".join(f"- {x}" for x in sorted(items))
-            return f"### {title}\n{body}\n"
-
         return (
             "# /analyze report\n\n"
-            + section("missing-coverage", self.missing_coverage)
+            + _md_section(title="missing-coverage", items=self.missing_coverage)
             + "\n"
-            + section("drift", self.drift)
+            + _md_section(title="drift", items=self.drift)
             + "\n"
-            + section("inconsistencies", self.inconsistencies)
+            + _md_section(title="inconsistencies", items=self.inconsistencies)
         )
 
 
-# --- Parsers ------------------------------------------------------------
+# --- Regex constants -----------------------------------------------------
 
-GOAL_RE = re.compile(
+GOAL_RE: Final[Pattern[str]] = re.compile(
     r"^\s*-\s*\[[ x]\]\s*\*\*G(\d+)\*\*\s*[·–\-]?\s*(.+?)\s*$",
     re.MULTILINE,
 )
-VALIDATION_RE = re.compile(
+VALIDATION_RE: Final[Pattern[str]] = re.compile(
     r"^\s*-\s*\[[ x]\]\s*\*\*V(\d+)\*\*\s*[·–\-]?\s*(.+?)\s*$",
     re.MULTILINE,
 )
-COVERS_INLINE_RE = re.compile(r"covers\s+([G\d, –\-]+)", re.IGNORECASE)
-G_REF_RE = re.compile(r"G(\d+)")
-V_REF_RE = re.compile(r"V(\d+)")
+COVERS_INLINE_RE: Final[Pattern[str]] = re.compile(
+    r"covers\s+([G\d, –\-]+)", re.IGNORECASE
+)
+G_REF_RE: Final[Pattern[str]] = re.compile(r"G(\d+)")
+V_REF_RE: Final[Pattern[str]] = re.compile(r"V(\d+)")
+G_RANGE_RE: Final[Pattern[str]] = re.compile(r"G(\d+)\s*[–\-]\s*G?(\d+)")
 
-SLICE_TABLE_ROW_RE = re.compile(
+SLICE_TABLE_ROW_RE: Final[Pattern[str]] = re.compile(
     r"^\|\s*S(\d+)\s*\|\s*(.+?)\s*\|[^|]*\|\s*(\S+)\s*\|",
     re.MULTILINE,
 )
-SLICE_HEADING_RE = re.compile(
+SLICE_HEADING_RE: Final[Pattern[str]] = re.compile(
     r"^###\s+S(\d+)\s*·\s*(.+?)\s*(?:—.+)?$",
     re.MULTILINE,
 )
-VALIDATIONS_REF_RE = re.compile(
+VALIDATIONS_REF_RE: Final[Pattern[str]] = re.compile(
     r"\*\*Validations referenced:\*\*\s*(.+?)\s*$", re.MULTILINE
 )
-COVERS_LINE_RE = re.compile(r"\*\*Covers:\*\*\s*(.+?)\s*$", re.MULTILINE)
+COVERS_LINE_RE: Final[Pattern[str]] = re.compile(
+    r"\*\*Covers:\*\*\s*(.+?)\s*$", re.MULTILINE
+)
 
-PR_ROW_RE = re.compile(
+PR_ROW_RE: Final[Pattern[str]] = re.compile(
     r"^\|\s*([A-Za-z][\w\-]*\d+|PR\d+)\s*\|\s*(.+?)\s*\|",
     re.MULTILINE,
 )
 
+GH_REF_RE: Final[Pattern[str]] = re.compile(r"^gh:([^#]+)#(\d+)$")
+GH_URL_RE: Final[Pattern[str]] = re.compile(
+    r"^https?://github\.com/([^/]+/[^/]+)/issues/(\d+)/?$"
+)
 
-def _section(body: str, name: str) -> str:
-    """Return text of `## name` section through the next `##` header (or EOF)."""
+
+# --- Parsers -------------------------------------------------------------
+
+
+def _section(*, body: str, name: str) -> str:
     pat = re.compile(rf"^##\s+{re.escape(name)}\b.*?$", re.IGNORECASE | re.MULTILINE)
     m = pat.search(body)
     if not m:
@@ -148,24 +149,23 @@ def _section(body: str, name: str) -> str:
     return body[start : start + nxt.start()] if nxt else body[start:]
 
 
-def _expand_covers(token: str) -> list[str]:
-    """Turn 'G1, G3-G5' into ['G1','G3','G4','G5']."""
+def _expand_covers(*, token: str) -> list[str]:
+    """Authors may write 'covers G1, G3-G5' — expand into individual goal ids."""
     out: list[str] = []
     for chunk in token.split(","):
         chunk = chunk.strip()
-        m = re.match(r"G(\d+)\s*[–\-]\s*G?(\d+)", chunk)
+        m = G_RANGE_RE.match(chunk)
         if m:
             lo, hi = int(m.group(1)), int(m.group(2))
             out.extend(f"G{i}" for i in range(lo, hi + 1))
             continue
         for g in G_REF_RE.findall(chunk):
             out.append(f"G{int(g)}")
-    # Preserve first-seen order, dedupe.
     return list(dict.fromkeys(out))
 
 
-def parse_goals(prd_body: str) -> list[Goal]:
-    section = _section(prd_body, "deliverables")
+def parse_goals(*, prd_body: str) -> list[Goal]:
+    section = _section(body=prd_body, name="deliverables")
     out: list[Goal] = []
     seen: set[str] = set()
     for m in GOAL_RE.finditer(section):
@@ -177,8 +177,8 @@ def parse_goals(prd_body: str) -> list[Goal]:
     return out
 
 
-def parse_validations(prd_body: str) -> list[Validation]:
-    section = _section(prd_body, "validations")
+def parse_validations(*, prd_body: str) -> list[Validation]:
+    section = _section(body=prd_body, name="validations")
     out: list[Validation] = []
     seen: set[str] = set()
     matches = list(VALIDATION_RE.finditer(section))
@@ -192,7 +192,7 @@ def parse_validations(prd_body: str) -> list[Validation]:
         chunk = m.group(0) + "\n" + section[start:end]
         covers: list[str] = []
         for cm in COVERS_INLINE_RE.finditer(chunk):
-            covers.extend(_expand_covers(cm.group(1)))
+            covers.extend(_expand_covers(token=cm.group(1)))
         out.append(
             Validation(
                 id=vid,
@@ -203,7 +203,7 @@ def parse_validations(prd_body: str) -> list[Validation]:
     return out
 
 
-def parse_slices(body: str) -> list[Slice]:
+def parse_slices(*, body: str) -> list[Slice]:
     discovered: dict[str, dict[str, str | None]] = {}
     for m in SLICE_TABLE_ROW_RE.finditer(body):
         sid = f"S{int(m.group(1))}"
@@ -231,7 +231,7 @@ def parse_slices(body: str) -> list[Slice]:
             vs.extend(f"V{int(v)}" for v in V_REF_RE.findall(vm.group(1)))
         gs: list[str] = []
         for cm in COVERS_LINE_RE.finditer(chunk):
-            gs.extend(_expand_covers(cm.group(1)))
+            gs.extend(_expand_covers(token=cm.group(1)))
         out.append(
             Slice(
                 id=sid,
@@ -244,55 +244,51 @@ def parse_slices(body: str) -> list[Slice]:
     return out
 
 
-def parse_pr_rows(body: str) -> list[PRRow]:
+def parse_pr_rows(*, body: str) -> list[PRRow]:
     rows: list[PRRow] = []
-    skip = {"id", "title", "blocker", "blocked", "status", "link", "---", "type"}
     for m in PR_ROW_RE.finditer(body):
         pid = m.group(1)
-        if pid.lower() in skip or set(pid) <= {"-", ":"}:
-            continue
         slice_m = re.search(r"\bS(\d+)\b", m.group(0))
         sid = f"S{int(slice_m.group(1))}" if slice_m else None
         rows.append(PRRow(id=pid, slice_id=sid))
     return rows
 
 
-# --- Detectors ----------------------------------------------------------
+# --- Detectors -----------------------------------------------------------
 
 
-def _numbering_gaps(label: str, ids: set[str]) -> list[str]:
+def _numbering_gaps(*, label: str, ids: set[str]) -> list[str]:
     if not ids:
         return []
     nums = sorted(int(x[1:]) for x in ids)
-    out: list[str] = []
-    for n in range(1, nums[-1] + 1):
-        if n not in nums:
-            out.append(
-                f"{label} numbering gap: {label}{n} missing "
-                f"(have {label}1..{label}{nums[-1]})"
-            )
-    return out
+    return [
+        f"{label} numbering gap: {label}{n} missing (have {label}1..{label}{nums[-1]})"
+        for n in range(1, nums[-1] + 1)
+        if n not in nums
+    ]
 
 
-def _slice_covers_goal(s: Slice, gid: str, val_by_id: dict[str, Validation]) -> bool:
-    if gid in s.covers:
+def _slice_covers_goal(
+    *, slice_: Slice, gid: str, val_by_id: dict[str, Validation]
+) -> bool:
+    if gid in slice_.covers:
         return True
-    for vid in s.validations:
-        v = val_by_id.get(vid)
-        if v and gid in v.covers:
-            return True
-    return False
+    return any(
+        (v := val_by_id.get(vid)) and gid in v.covers for vid in slice_.validations
+    )
 
 
 def _detect_missing_coverage(
-    goals: list[Goal], validations: list[Validation], slices: list[Slice]
+    *, goals: list[Goal], validations: list[Validation], slices: list[Slice]
 ) -> list[str]:
     if not (goals and slices):
         return []
-    val_by_id = {v.id: v for v in validations}
+    val_by_id: dict[str, Validation] = {v.id: v for v in validations}
     out: list[str] = []
     for g in goals:
-        if any(_slice_covers_goal(s, g.id, val_by_id) for s in slices):
+        if any(
+            _slice_covers_goal(slice_=s, gid=g.id, val_by_id=val_by_id) for s in slices
+        ):
             continue
         vs_for_g = [v.id for v in validations if g.id in v.covers]
         tag = f" (referenced by {', '.join(vs_for_g)})" if vs_for_g else ""
@@ -301,60 +297,70 @@ def _detect_missing_coverage(
 
 
 def _detect_drift(
+    *,
     goals: list[Goal],
     validations: list[Validation],
     slices: list[Slice],
     prs: list[PRRow],
 ) -> list[str]:
-    goal_ids = {g.id for g in goals}
-    val_ids = {v.id for v in validations}
-    slice_ids = {s.id for s in slices}
+    goal_ids: set[str] = {g.id for g in goals}
+    val_ids: set[str] = {v.id for v in validations}
+    slice_ids: set[str] = {s.id for s in slices}
     out: list[str] = []
     if goals:
         for v in validations:
-            for gid in v.covers:
-                if gid not in goal_ids:
-                    out.append(f"{v.id} covers {gid} but {gid} not in PRD")
+            out.extend(
+                f"{v.id} covers {gid} but {gid} not in PRD"
+                for gid in v.covers
+                if gid not in goal_ids
+            )
     if validations:
         for s in slices:
-            for vid in s.validations:
-                if vid not in val_ids:
-                    out.append(f"slice {s.id} references {vid} not in PRD")
+            out.extend(
+                f"slice {s.id} references {vid} not in PRD"
+                for vid in s.validations
+                if vid not in val_ids
+            )
     if goals:
         for s in slices:
-            for gid in s.covers:
-                if gid not in goal_ids:
-                    out.append(f"slice {s.id} covers {gid} not in PRD")
+            out.extend(
+                f"slice {s.id} covers {gid} not in PRD"
+                for gid in s.covers
+                if gid not in goal_ids
+            )
     if slices:
-        for pr in prs:
-            if pr.slice_id and pr.slice_id not in slice_ids:
-                out.append(
-                    f"PR {pr.id} references {pr.slice_id} "
-                    "which is not in the slice list"
-                )
+        out.extend(
+            f"PR {pr.id} references {pr.slice_id} which is not in the slice list"
+            for pr in prs
+            if pr.slice_id and pr.slice_id not in slice_ids
+        )
     return out
 
 
-# --- Top-level analyzer -------------------------------------------------
+# --- Top-level analyzer --------------------------------------------------
 
 
-def analyze(artifacts: dict[Kind, str]) -> AnalyzeReport:
+def analyze(*, artifacts: dict[Kind, str]) -> AnalyzeReport:
     prd = artifacts.get(Kind.PRD, "")
     slices_body = artifacts.get(Kind.SLICES, "")
     pr_body = artifacts.get(Kind.PR_TABLE, "")
 
-    goals = parse_goals(prd) if prd else []
-    validations = parse_validations(prd) if prd else []
-    slices = parse_slices(slices_body) if slices_body else []
-    prs = parse_pr_rows(pr_body) if pr_body else []
+    goals = parse_goals(prd_body=prd) if prd else []
+    validations = parse_validations(prd_body=prd) if prd else []
+    slices = parse_slices(body=slices_body) if slices_body else []
+    prs = parse_pr_rows(body=pr_body) if pr_body else []
 
     report = AnalyzeReport(
-        missing_coverage=_detect_missing_coverage(goals, validations, slices),
-        drift=_detect_drift(goals, validations, slices, prs),
+        missing_coverage=_detect_missing_coverage(
+            goals=goals, validations=validations, slices=slices
+        ),
+        drift=_detect_drift(
+            goals=goals, validations=validations, slices=slices, prs=prs
+        ),
         inconsistencies=(
-            _numbering_gaps("G", {g.id for g in goals})
-            + _numbering_gaps("V", {v.id for v in validations})
-            + _numbering_gaps("S", {s.id for s in slices})
+            _numbering_gaps(label="G", ids={g.id for g in goals})
+            + _numbering_gaps(label="V", ids={v.id for v in validations})
+            + _numbering_gaps(label="S", ids={s.id for s in slices})
         ),
     )
     report.missing_coverage = sorted(set(report.missing_coverage))
@@ -363,39 +369,49 @@ def analyze(artifacts: dict[Kind, str]) -> AnalyzeReport:
     return report
 
 
-# --- I/O ----------------------------------------------------------------
-
-GH_REF_RE = re.compile(r"^gh:([^#]+)#(\d+)$")
-GH_URL_RE = re.compile(r"^https?://github\.com/([^/]+/[^/]+)/issues/(\d+)/?$")
+# --- I/O -----------------------------------------------------------------
 
 
-def fetch(ref: str) -> str:
+def _md_section(*, title: str, items: list[str]) -> str:
+    if not items:
+        return f"### {title}\n_(none)_\n"
+    body = "\n".join(f"- {x}" for x in sorted(items))
+    return f"### {title}\n{body}\n"
+
+
+def fetch(*, ref: str) -> str:
     m = GH_REF_RE.match(ref) or GH_URL_RE.match(ref)
     if m:
         repo, num = m.group(1), m.group(2)
         proc = subprocess.run(
             [
-                "gh", "issue", "view", num,
-                "--repo", repo,
-                "--json", "body",
-                "-q", ".body",
+                "gh",
+                "issue",
+                "view",
+                num,
+                "--repo",
+                repo,
+                "--json",
+                "body",
+                "-q",
+                ".body",
             ],
             capture_output=True,
             text=True,
             check=False,
         )
         if proc.returncode != 0:
-            raise RuntimeError(
+            raise ArtifactFetchError(
                 f"gh issue view {repo}#{num} failed: {proc.stderr.strip()}"
             )
         return proc.stdout
     p = Path(ref)
     if not p.exists():
-        raise FileNotFoundError(f"artifact not found: {ref}")
+        raise ArtifactFetchError(f"artifact not found: {ref}")
     return p.read_text()
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(*, argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Cross-artifact consistency gate")
     ap.add_argument("--prd")
     ap.add_argument("--slices")
@@ -413,8 +429,8 @@ def main(argv: list[str] | None = None) -> int:
             (Kind.PR_TABLE, args.pr_table),
         ):
             if val:
-                artifacts[kind] = fetch(val)
-    except (RuntimeError, FileNotFoundError) as e:
+                artifacts[kind] = fetch(ref=val)
+    except AnalyzeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
@@ -426,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    report = analyze(artifacts)
+    report = analyze(artifacts=artifacts)
     if args.format == "json":
         print(
             json.dumps(

@@ -34,7 +34,7 @@ If args missing, ask via AskUserQuestion. Resolve from registry.
 ### 1. Show summary
 
 ```bash
-python3 /Users/alf/.claude/skills/pr-decide/scripts/pr_decide.py show <plan> <task-id>
+python3 "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/pr-decide}/scripts/pr_decide.py" show <plan> <task-id>
 ```
 
 Pass through the script's stdout to the user verbatim.
@@ -56,7 +56,7 @@ Use AskUserQuestion (max 4 options). Tailor the option set to the phase as above
 ### 4. Execute
 
 ```bash
-python3 /Users/alf/.claude/skills/pr-decide/scripts/pr_decide.py <action> <plan> <task-id>
+python3 "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/pr-decide}/scripts/pr_decide.py" <action> <plan> <task-id>
 ```
 
 Pass through the script's output. The script handles:

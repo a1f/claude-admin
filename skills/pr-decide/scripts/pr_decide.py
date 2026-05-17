@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-pr_babysit.py — post-review decision interface for a dispatched task.
+pr_decide.py — post-review decision interface for a dispatched task.
 
 Subcommands:
     show     <plan> <task-id>                  print review summary, no side effects
@@ -193,7 +193,7 @@ def cmd_ready(plan: str, task_id: str) -> int:
 
     print(f"✓ PR {state.get('pr_url')} promoted to ready.")
     print(f"  Wait for CI to go green on GitHub, then:")
-    print(f"  /pr-babysit {plan} {task_id} merge")
+    print(f"  /pr-decide {plan} {task_id} merge")
     return 0
 
 
@@ -247,7 +247,7 @@ def cmd_drop(plan: str, task_id: str, reason: str | None) -> int:
 
     comment_body = None
     if reason:
-        comment_body = f"**Dropped by /pr-babysit.** Reason: {reason}\n\n_Posted by claude_admin._"
+        comment_body = f"**Dropped by /pr-decide.** Reason: {reason}\n\n_Posted by claude_admin._"
 
     if pr_num and gh_repo:
         if comment_body:
@@ -385,7 +385,7 @@ def build_iterate_bundle(summary: dict) -> str:
         lines.append("")
 
     lines.append("---")
-    lines.append("_Posted by `/pr-babysit iterate`. Address the blockers + majors and concerns. "
+    lines.append("_Posted by `/pr-decide iterate`. Address the blockers + majors and concerns. "
                  "Push fixes to the same branch; the existing draft PR will update. "
                  "Re-run reviews afterwards via the watcher's `review` subcommand._")
 

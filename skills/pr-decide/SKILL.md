@@ -1,16 +1,23 @@
 ---
-name: pr-babysit
-description: "User-facing skill for the post-review decision on a dispatched task. Shows the aggregated review summary (reviewers + critics + recommendation) and lets the user act: ready (promote draft -> ready), merge (after CI green), drop (close PR), or wait. Use when the user asks to act on a reviewed PR, approve/reject a PR, merge a task, drop a task, or invokes /pr-babysit. Examples: '/pr-babysit v2_design M0a-T1', '/pr-babysit v2_design M0a-T1 ready', 'merge M0a-T1', 'drop M0a-T1'."
+name: pr-decide
+description: "User-facing post-review decision skill for a dispatched task. Shows the aggregated review summary (reviewers + critics + recommendation) and lets the user act: ready (promote draft -> ready), merge (after CI green), drop (close PR), or iterate (re-dispatch with feedback). Use after /pr-babysit has finished its CI/review-routing loop and is waiting on a human verdict. Examples: '/pr-decide v2_design M0a-T1', '/pr-decide v2_design M0a-T1 ready', 'merge M0a-T1', 'drop M0a-T1'."
 argument-hint: "<plan-codename> <task-id> [show|ready|merge|drop|iterate]"
 ---
 
-# pr-babysit skill
+# pr-decide skill
 
 Pick up a reviewed PR, show the user the aggregated review summary, and execute their decision.
 
+This is the optional terminal step a human runs after `/pr-babysit` has finished
+its automated CI + comment-routing loop. `/pr-babysit` reaches one of:
+
+- `[READY TO MERGE]` — green CI, no blocking comments → run `/pr-decide ... merge`.
+- `[ESCALATED]` — stuck, posted to slice issue for architector → human inspects, may `/pr-decide ... drop` or re-dispatch via `/coder`.
+- `[MAX ROUNDS EXHAUSTED]` — same as escalation.
+
 ## Inputs
 
-`/pr-babysit <plan-codename> <task-id> [<action>]`
+`/pr-decide <plan-codename> <task-id> [<action>]`
 
 Actions:
 
@@ -27,7 +34,7 @@ If args missing, ask via AskUserQuestion. Resolve from registry.
 ### 1. Show summary
 
 ```bash
-python3 /Users/alf/.claude/skills/pr-babysit/scripts/pr_babysit.py show <plan> <task-id>
+python3 /Users/alf/.claude/skills/pr-decide/scripts/pr_decide.py show <plan> <task-id>
 ```
 
 Pass through the script's stdout to the user verbatim.
@@ -49,7 +56,7 @@ Use AskUserQuestion (max 4 options). Tailor the option set to the phase as above
 ### 4. Execute
 
 ```bash
-python3 /Users/alf/.claude/skills/pr-babysit/scripts/pr_babysit.py <action> <plan> <task-id>
+python3 /Users/alf/.claude/skills/pr-decide/scripts/pr_decide.py <action> <plan> <task-id>
 ```
 
 Pass through the script's output. The script handles:
@@ -61,9 +68,9 @@ Pass through the script's output. The script handles:
 
 ### 5. After ready, what's next?
 
-When the user picks `ready`, this skill exits (state phase = `accepted_pending_ci`). The user comes back later — once GitHub CI is green — and runs `/pr-babysit <plan> <task-id> merge` to actually merge. Or the (future) CI watcher skill will auto-merge.
+When the user picks `ready`, this skill exits (state phase = `accepted_pending_ci`). The user comes back later — once GitHub CI is green — and runs `/pr-decide <plan> <task-id> merge` to actually merge. Or `/pr-babysit` (the polling loop) will reach `[READY TO MERGE]` on its own when CI lands.
 
-Tell the user explicitly: "PR is now ready. Wait for CI to go green on GitHub, then run `/pr-babysit v2_design M0a-T1 merge` to merge."
+Tell the user explicitly: "PR is now ready. Wait for CI to go green on GitHub, then run `/pr-decide v2_design M0a-T1 merge` to merge."
 
 ## When invoked with an action
 
@@ -78,3 +85,4 @@ If the user picks `drop`, ask them for a one-line reason (AskUserQuestion or jus
 - This skill never modifies the worktree or branch directly. All state changes go through `gh` and `~/.work/dispatches/<plan>/<task-id>/state.json`.
 - The state.json field `user_decision` is set by this skill. Future skills (CI watcher, auto-merge) read it.
 - If state.json doesn't exist for `<plan>/<task-id>`, surface a clear error — the PR wasn't created via `/dispatch`, so we have no review summary.
+- For the **automated** CI + comment-routing loop (poll `gh pr checks`, fix bot comments, route human feedback to architector, invoke /diagnose on CI red), see `/pr-babysit`.

@@ -78,7 +78,7 @@ Run the bundled fetch script once with `--setup` to get PR metadata + repo info
 + initial CHECKS in a single JSON payload:
 
 ```bash
-bash skills/pr-babysit/scripts/run.sh --setup [--pr=NUM]
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/pr-babysit}/scripts/run.sh" --setup [--pr=NUM]
 ```
 
 The script:
@@ -180,7 +180,7 @@ If `PR_STATE` is `MERGED` or `CLOSED`, print `[<STATE>] <PR_URL>` and exit.
 ### 1b. Fetch fresh data (one call, returns JSON)
 
 ```bash
-bash skills/pr-babysit/scripts/run.sh --poll \
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/pr-babysit}/scripts/run.sh" --poll \
   --pr="$PR_NUMBER" --since="$LAST_CHECKED" > "$STATE_DIR/round.json"
 ```
 
@@ -372,7 +372,11 @@ If any checks are **failing**:
 
 1. **Spawn /diagnose subagent (one Agent call, analysis only)**:
 
-   Read `skills/diagnose/SKILL.md` content (the discipline) into `$DIAGNOSE_PROMPT`.
+   Read the /diagnose discipline into `$DIAGNOSE_PROMPT`. The file lives at one
+   of (in priority order, use the first that exists):
+   - `${CLAUDE_PLUGIN_ROOT}/../diagnose/SKILL.md` when /pr-babysit is installed as a plugin
+   - `$HOME/.claude/skills/diagnose/SKILL.md` for the user install
+   - `<repo-root>/skills/diagnose/SKILL.md` when running from a worktree checkout
    Capture failure logs:
    ```bash
    for FAIL_RUN in $(echo "$CHECKS" | jq -r '.[] | select(.conclusion=="FAILURE") | .detailsUrl' | grep -oE '[0-9]+$'); do

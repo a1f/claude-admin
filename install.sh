@@ -4,6 +4,11 @@
 # Discovery-based: for every directory under <repo>/skills/, install a symlink at
 # ~/.claude/skills/<name> pointing back to the repo. Re-run after adding new skills.
 #
+# The `skills/*/` glob below intentionally matches every subdirectory, including
+# underscore-prefixed library dirs like `_runtime/` and `_lib/` (M1 G8 / S7).
+# Those aren't user-invocable skills, but installing them keeps script imports
+# inside `~/.claude/skills/` self-resolving for skills that depend on them.
+#
 # Idempotent: existing symlinks pointing at the right target are left alone.
 # Refuses to overwrite a real directory (you must move/remove it manually).
 #

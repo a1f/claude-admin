@@ -48,76 +48,84 @@ class EngineKindResult:
 
 
 @dataclass(frozen=True, slots=True)
+class EngineKindCollection:
+    runs: tuple[ReviewerRun, ...]
+    errored: int
+    empty: int
+
+
+@dataclass(frozen=True, slots=True)
 class KindResult:
     per_engine: dict[str, EngineKindResult]
     union_findings: tuple[Finding, ...]
     union_counts: dict[str, int]
 
 
+@dataclass(frozen=True, slots=True)
+class RenderedSummary:
+    markdown: str
+    totals: dict[str, int]
+
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser()
-    p.add_argument("--bundle", required=True, type=Path)
-    p.add_argument("--pr", required=True)
-    p.add_argument("--kinds", required=True)
-    p.add_argument("--runs", required=True, type=int)
-    p.add_argument("--engines", default="claude")
-    return p.parse_args()
+    parser: argparse.ArgumentParser = argparse.ArgumentParser()
+    parser.add_argument("--bundle", required=True, type=Path)
+    parser.add_argument("--pr", required=True)
+    parser.add_argument("--kinds", required=True)
+    parser.add_argument("--runs", required=True, type=int)
+    parser.add_argument("--engines", default="claude")
+    return parser.parse_args()
 
 
 def extract_json(*, text: str) -> dict | None:
     """Claude/Codex sometimes wrap JSON in markdown fences; scan for the first balanced object."""
-    start = text.find("{")
+    start: int = text.find("{")
     if start == -1:
         return None
-    depth = 0
-    in_str = False
-    escape = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_str:
+    depth: int = 0
+    in_string: bool = False
+    escape: bool = False
+    for index in range(start, len(text)):
+        char: str = text[index]
+        if in_string:
             if escape:
                 escape = False
-            elif ch == "\\":
+            elif char == "\\":
                 escape = True
-            elif ch == '"':
-                in_str = False
+            elif char == '"':
+                in_string = False
             continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
+        if char == '"':
+            in_string = True
+        elif char == "{":
             depth += 1
-        elif ch == "}":
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 try:
-                    return json.loads(text[start : i + 1])
+                    return json.loads(text[start : index + 1])
                 except json.JSONDecodeError:
                     return None
     return None
 
 
-def load_run(*, log_path: Path, kind: str) -> ReviewerRun | None:
-    if not log_path.exists() or log_path.stat().st_size == 0:
-        return None
-    obj = extract_json(text=log_path.read_text(errors="replace"))
-    if obj is None or obj.get("_error"):
-        return None
-    raw_findings = obj.get("findings") if isinstance(obj.get("findings"), list) else []
-    return ReviewerRun(
-        kind=str(obj.get("kind", kind)),
-        summary=str(obj.get("summary", "")).strip(),
-        findings=tuple(_parse_finding(raw=f) for f in raw_findings if isinstance(f, dict)),
+def safe_int(*, value: object) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
+def parse_finding(*, raw: dict) -> Finding:
+    severity: str = raw.get("severity", "nit")
+    if severity not in SEVERITIES:
+        severity = "nit"
+    raw_lines: object = raw.get("lines") or []
+    lines: tuple[int, ...] = (
+        tuple(safe_int(value=item) for item in raw_lines) if isinstance(raw_lines, list) else ()
     )
-
-
-def _parse_finding(*, raw: dict) -> Finding:
-    sev = raw.get("severity", "nit")
-    if sev not in SEVERITIES:
-        sev = "nit"
-    raw_lines = raw.get("lines") or []
-    lines = tuple(_safe_int(value=v) for v in raw_lines) if isinstance(raw_lines, list) else ()
     return Finding(
-        severity=sev,
+        severity=severity,
         file=str(raw.get("file", "?")),
         lines=lines,
         desc=str(raw.get("desc", "")).strip(),
@@ -125,17 +133,27 @@ def _parse_finding(*, raw: dict) -> Finding:
     )
 
 
-def _safe_int(*, value: object) -> int:
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return 0
+def load_run(*, log_path: Path, kind: str) -> ReviewerRun | None:
+    if not log_path.exists() or log_path.stat().st_size == 0:
+        return None
+    obj: dict | None = extract_json(text=log_path.read_text(errors="replace"))
+    if obj is None or obj.get("_error"):
+        return None
+    raw_findings: list = obj.get("findings") if isinstance(obj.get("findings"), list) else []
+    findings: tuple[Finding, ...] = tuple(
+        parse_finding(raw=item) for item in raw_findings if isinstance(item, dict)
+    )
+    return ReviewerRun(
+        kind=str(obj.get("kind", kind)),
+        summary=str(obj.get("summary", "")).strip(),
+        findings=findings,
+    )
 
 
 def finding_key(*, finding: Finding) -> str:
     """Dedup key: file + first-line + 8-char hash of the first 80 chars of desc."""
-    first_line = finding.lines[0] if finding.lines else 0
-    desc_hash = hashlib.sha1(finding.desc[:80].encode()).hexdigest()[:8]
+    first_line: int = finding.lines[0] if finding.lines else 0
+    desc_hash: str = hashlib.sha1(finding.desc[:80].encode()).hexdigest()[:8]
     return f"{finding.file}:{first_line}:{desc_hash}"
 
 
@@ -151,81 +169,87 @@ def merge_findings(*, tagged: list[tuple[ReviewerRun, str]]) -> tuple[Finding, .
     by_key: dict[str, Finding] = {}
     engines_by_key: defaultdict[str, set[str]] = defaultdict(set)
     for run, engine in tagged:
-        for f in run.findings:
-            key = finding_key(finding=f)
+        for finding in run.findings:
+            key: str = finding_key(finding=finding)
             engines_by_key[key].add(engine)
-            current = by_key.get(key)
-            if current is None or severity_rank(severity=f.severity) < severity_rank(severity=current.severity):
-                by_key[key] = f
+            current: Finding | None = by_key.get(key)
+            if current is None or severity_rank(severity=finding.severity) < severity_rank(severity=current.severity):
+                by_key[key] = finding
 
-    merged = [
+    merged: list[Finding] = [
         Finding(
-            severity=f.severity,
-            file=f.file,
-            lines=f.lines,
-            desc=f.desc,
-            suggested_fix=f.suggested_fix,
+            severity=finding.severity,
+            file=finding.file,
+            lines=finding.lines,
+            desc=finding.desc,
+            suggested_fix=finding.suggested_fix,
             engines=tuple(sorted(engines_by_key[key])),
         )
-        for key, f in by_key.items()
+        for key, finding in by_key.items()
     ]
-    merged.sort(key=lambda f: (severity_rank(severity=f.severity), f.file, f.lines[0] if f.lines else 0))
+    merged.sort(
+        key=lambda finding: (
+            severity_rank(severity=finding.severity),
+            finding.file,
+            finding.lines[0] if finding.lines else 0,
+        )
+    )
     return tuple(merged)
 
 
 def count_by_severity(*, findings: tuple[Finding, ...]) -> dict[str, int]:
     counts: defaultdict[str, int] = defaultdict(int)
-    for f in findings:
-        counts[f.severity] += 1
+    for finding in findings:
+        counts[finding.severity] += 1
     return dict(counts)
 
 
-def collect_engine_kind(
-    *, bundle: Path, kind: str, engine: str, runs_planned: int
-) -> tuple[list[ReviewerRun], int, int]:
-    """Returns (runs, errored_count, empty_count); errored = subprocess sentinel, empty = missing/unparseable."""
+def collect_engine_kind(*, bundle: Path, kind: str, engine: str, runs_planned: int) -> EngineKindCollection:
+    """errored = subprocess sentinel; empty = log missing/unparseable."""
     runs: list[ReviewerRun] = []
-    errored = 0
-    empty = 0
-    for r in range(1, runs_planned + 1):
-        log_path = bundle / "logs" / f"{engine}-{kind}-{r}.jsonl"
+    errored: int = 0
+    empty: int = 0
+    for run_num in range(1, runs_planned + 1):
+        log_path: Path = bundle / "logs" / f"{engine}-{kind}-{run_num}.jsonl"
         if not log_path.exists() or log_path.stat().st_size == 0:
             empty += 1
             continue
-        obj = extract_json(text=log_path.read_text(errors="replace"))
+        obj: dict | None = extract_json(text=log_path.read_text(errors="replace"))
         if obj is None:
             empty += 1
             continue
         if obj.get("_error"):
             errored += 1
             continue
-        loaded = load_run(log_path=log_path, kind=kind)
+        loaded: ReviewerRun | None = load_run(log_path=log_path, kind=kind)
         if loaded is None:
             empty += 1
         else:
             runs.append(loaded)
-    return runs, errored, empty
+    return EngineKindCollection(runs=tuple(runs), errored=errored, empty=empty)
 
 
 def aggregate_kind(*, bundle: Path, kind: str, engines: list[str], runs_planned: int) -> KindResult:
     per_engine: dict[str, EngineKindResult] = {}
     all_tagged: list[tuple[ReviewerRun, str]] = []
     for engine in engines:
-        runs, errored, empty = collect_engine_kind(
+        collection: EngineKindCollection = collect_engine_kind(
             bundle=bundle, kind=kind, engine=engine, runs_planned=runs_planned
         )
-        engine_findings = merge_findings(tagged=[(r, engine) for r in runs])
+        engine_findings: tuple[Finding, ...] = merge_findings(
+            tagged=[(run, engine) for run in collection.runs]
+        )
         per_engine[engine] = EngineKindResult(
-            runs_used=len(runs),
-            runs_errored=errored,
-            runs_empty=empty,
-            summaries=tuple(r.summary for r in runs if r.summary),
+            runs_used=len(collection.runs),
+            runs_errored=collection.errored,
+            runs_empty=collection.empty,
+            summaries=tuple(run.summary for run in collection.runs if run.summary),
             findings=engine_findings,
             counts=count_by_severity(findings=engine_findings),
         )
-        all_tagged.extend((r, engine) for r in runs)
+        all_tagged.extend((run, engine) for run in collection.runs)
 
-    union_findings = merge_findings(tagged=all_tagged)
+    union_findings: tuple[Finding, ...] = merge_findings(tagged=all_tagged)
     return KindResult(
         per_engine=per_engine,
         union_findings=union_findings,
@@ -233,36 +257,36 @@ def aggregate_kind(*, bundle: Path, kind: str, engines: list[str], runs_planned:
     )
 
 
-def _sev_cell(*, counts: dict[str, int]) -> str:
-    return "/".join(str(counts.get(s, 0)) for s in SEVERITIES)
+def severity_cell(*, counts: dict[str, int]) -> str:
+    return "/".join(str(counts.get(severity, 0)) for severity in SEVERITIES)
 
 
-def _union_cell(*, counts: dict[str, int]) -> str:
-    blocker = counts.get("blocker", 0)
-    rest = "/".join(str(counts.get(s, 0)) for s in SEVERITIES[1:])
-    return f"**{blocker}**/{rest}"
+def union_cell(*, counts: dict[str, int]) -> str:
+    blocker_count: int = counts.get("blocker", 0)
+    rest: str = "/".join(str(counts.get(severity, 0)) for severity in SEVERITIES[1:])
+    return f"**{blocker_count}**/{rest}"
 
 
 def render_summary_md(
     *,
-    pr: str,
+    pr_number: str,
     by_kind: dict[str, KindResult],
     kinds: list[str],
     engines: list[str],
     runs_planned: int,
-) -> tuple[str, dict[str, int]]:
-    multi_engine = len(engines) > 1
-    eng_label = " + ".join(ENGINE_LABEL.get(e, e) for e in engines)
+) -> RenderedSummary:
+    multi_engine: bool = len(engines) > 1
+    engine_label: str = " + ".join(ENGINE_LABEL.get(engine, engine) for engine in engines)
 
     lines: list[str] = [
-        f"## 🔍 Multi-agent review — PR #{pr}",
+        f"## 🔍 Multi-agent review — PR #{pr_number}",
         "",
-        f"_{eng_label} reviewers, {runs_planned} independent run(s) per kind per engine; "
+        f"_{engine_label} reviewers, {runs_planned} independent run(s) per kind per engine; "
         "findings deduped (union across runs and engines)._",
         "",
     ]
 
-    header_cells = ["Kind"] + [f"{ENGINE_LABEL.get(e, e)} (b/M/m/n)" for e in engines]
+    header_cells: list[str] = ["Kind"] + [f"{ENGINE_LABEL.get(engine, engine)} (b/M/m/n)" for engine in engines]
     if multi_engine:
         header_cells.append("Union (b/M/m/n)")
     lines.append("| " + " | ".join(header_cells) + " |")
@@ -270,25 +294,28 @@ def render_summary_md(
 
     union_totals: defaultdict[str, int] = defaultdict(int)
     for kind in kinds:
-        info = by_kind.get(kind)
+        info: KindResult | None = by_kind.get(kind)
         if info is None:
             continue
-        row = [f"`{kind}`"]
+        row: list[str] = [f"`{kind}`"]
         for engine in engines:
-            ekr = info.per_engine[engine]
-            ru_marker = "" if ekr.runs_used > 0 else " ⚠"
-            row.append(f"{_sev_cell(counts=ekr.counts)} ({ekr.runs_used}/{runs_planned}{ru_marker})")
+            engine_kind_result: EngineKindResult = info.per_engine[engine]
+            runs_marker: str = "" if engine_kind_result.runs_used > 0 else " ⚠"
+            row.append(
+                f"{severity_cell(counts=engine_kind_result.counts)} "
+                f"({engine_kind_result.runs_used}/{runs_planned}{runs_marker})"
+            )
         if multi_engine:
-            row.append(_union_cell(counts=info.union_counts))
-            for sev, n in info.union_counts.items():
-                union_totals[sev] += n
+            row.append(union_cell(counts=info.union_counts))
+            for severity, count in info.union_counts.items():
+                union_totals[severity] += count
         else:
-            for sev, n in info.per_engine[engines[0]].counts.items():
-                union_totals[sev] += n
+            for severity, count in info.per_engine[engines[0]].counts.items():
+                union_totals[severity] += count
         lines.append("| " + " | ".join(row) + " |")
 
-    totals_row = ["**Total**"] + ["" for _ in engines]
-    totals_cell = _union_cell(counts=dict(union_totals))
+    totals_row: list[str] = ["**Total**"] + ["" for _ in engines]
+    totals_cell: str = union_cell(counts=dict(union_totals))
     if multi_engine:
         totals_row.append(totals_cell)
     else:
@@ -307,61 +334,63 @@ def render_summary_md(
         "Detail comments per kind follow below for any kind with findings. "
         "Each finding is tagged with the engine(s) that flagged it — agreement across engines is a confidence signal."
     )
-    return "\n".join(lines) + "\n", dict(union_totals)
+    return RenderedSummary(markdown="\n".join(lines) + "\n", totals=dict(union_totals))
 
 
-def render_detail_md(*, pr: str, kind: str, info: KindResult, engines: list[str]) -> str:
+def render_detail_md(*, pr_number: str, kind: str, info: KindResult, engines: list[str]) -> str:
     if not info.union_findings:
         return ""
 
-    multi_engine = len(engines) > 1
+    multi_engine: bool = len(engines) > 1
     by_file: defaultdict[str, list[Finding]] = defaultdict(list)
-    for f in info.union_findings:
-        by_file[f.file].append(f)
+    for finding in info.union_findings:
+        by_file[finding.file].append(finding)
 
-    uc = info.union_counts
+    counts: dict[str, int] = info.union_counts
     lines: list[str] = [
-        f"### `{kind}` reviewer findings — PR #{pr}",
+        f"### `{kind}` reviewer findings — PR #{pr_number}",
         "",
-        f"_Union across engines: blockers {uc.get('blocker', 0)}, "
-        f"major {uc.get('major', 0)}, minor {uc.get('minor', 0)}, nit {uc.get('nit', 0)}._",
+        f"_Union across engines: blockers {counts.get('blocker', 0)}, "
+        f"major {counts.get('major', 0)}, minor {counts.get('minor', 0)}, nit {counts.get('nit', 0)}._",
     ]
     if multi_engine:
-        parts = []
-        for e in engines:
-            c = info.per_engine[e].counts
+        parts: list[str] = []
+        for engine in engines:
+            engine_counts: dict[str, int] = info.per_engine[engine].counts
             parts.append(
-                f"{ENGINE_LABEL.get(e, e)}: {c.get('blocker', 0)} blockers, "
-                f"{c.get('major', 0)} major, {c.get('minor', 0)} minor, {c.get('nit', 0)} nit"
+                f"{ENGINE_LABEL.get(engine, engine)}: {engine_counts.get('blocker', 0)} blockers, "
+                f"{engine_counts.get('major', 0)} major, "
+                f"{engine_counts.get('minor', 0)} minor, "
+                f"{engine_counts.get('nit', 0)} nit"
             )
         lines.append(f"_{'; '.join(parts)}._")
     lines.append("")
 
     for engine in engines:
-        summaries = info.per_engine[engine].summaries
+        summaries: tuple[str, ...] = info.per_engine[engine].summaries
         if summaries:
             lines.append(f"**{ENGINE_LABEL.get(engine, engine)} summaries:**")
-            lines.extend(f"- {s}" for s in summaries)
+            lines.extend(f"- {summary}" for summary in summaries)
             lines.append("")
 
     for file_path, findings in sorted(by_file.items()):
         lines.append(f"#### `{file_path}`")
         lines.append("")
-        for f in findings:
-            lines.extend(_render_finding(finding=f, multi_engine=multi_engine))
+        for finding in findings:
+            lines.extend(render_finding(finding=finding, multi_engine=multi_engine))
         lines.append("")
 
     return "\n".join(lines) + "\n"
 
 
-def _render_finding(*, finding: Finding, multi_engine: bool) -> list[str]:
-    emoji = SEVERITY_EMOJI.get(finding.severity, "·")
-    anchor = _line_anchor(lines=finding.lines)
-    engine_tag = ""
+def render_finding(*, finding: Finding, multi_engine: bool) -> list[str]:
+    emoji: str = SEVERITY_EMOJI.get(finding.severity, "·")
+    anchor: str = line_anchor(lines=finding.lines)
+    engine_tag: str = ""
     if multi_engine and finding.engines:
-        labels = [ENGINE_LABEL.get(e, e) for e in finding.engines]
+        labels: list[str] = [ENGINE_LABEL.get(engine, engine) for engine in finding.engines]
         engine_tag = f" _[{'+'.join(labels)}]_"
-    out = [f"- {emoji} **{finding.severity}** {anchor}{engine_tag}".rstrip()]
+    out: list[str] = [f"- {emoji} **{finding.severity}** {anchor}{engine_tag}".rstrip()]
     if finding.desc:
         out.append(f"  - {finding.desc}")
     if finding.suggested_fix:
@@ -369,7 +398,7 @@ def _render_finding(*, finding: Finding, multi_engine: bool) -> list[str]:
     return out
 
 
-def _line_anchor(*, lines: tuple[int, ...]) -> str:
+def line_anchor(*, lines: tuple[int, ...]) -> str:
     if len(lines) >= 2:
         return f"L{lines[0]}–L{lines[1]}"
     if len(lines) == 1:
@@ -381,25 +410,25 @@ def serialize_kind_for_json(*, info: KindResult, engines: list[str]) -> dict:
     return {
         "union": {"counts": dict(info.union_counts)},
         "per_engine": {
-            e: {
-                "counts": dict(info.per_engine[e].counts),
-                "runs_used": info.per_engine[e].runs_used,
-                "runs_errored": info.per_engine[e].runs_errored,
-                "runs_empty": info.per_engine[e].runs_empty,
+            engine: {
+                "counts": dict(info.per_engine[engine].counts),
+                "runs_used": info.per_engine[engine].runs_used,
+                "runs_errored": info.per_engine[engine].runs_errored,
+                "runs_empty": info.per_engine[engine].runs_empty,
             }
-            for e in engines
+            for engine in engines
         },
     }
 
 
 def main() -> int:
-    args = parse_args()
+    args: argparse.Namespace = parse_args()
     bundle: Path = args.bundle
     if not bundle.is_dir():
         print(f"aggregate: bundle dir not found: {bundle}", file=sys.stderr)
         return 1
-    kinds = [k.strip() for k in args.kinds.split(",") if k.strip()]
-    engines = [e.strip() for e in args.engines.split(",") if e.strip()]
+    kinds: list[str] = [kind.strip() for kind in args.kinds.split(",") if kind.strip()]
+    engines: list[str] = [engine.strip() for engine in args.engines.split(",") if engine.strip()]
     if not kinds:
         print("aggregate: --kinds is empty", file=sys.stderr)
         return 1
@@ -407,40 +436,37 @@ def main() -> int:
         print("aggregate: --engines is empty", file=sys.stderr)
         return 1
 
-    by_kind = {
-        k: aggregate_kind(bundle=bundle, kind=k, engines=engines, runs_planned=args.runs)
-        for k in kinds
+    by_kind: dict[str, KindResult] = {
+        kind: aggregate_kind(bundle=bundle, kind=kind, engines=engines, runs_planned=args.runs)
+        for kind in kinds
     }
-    summary_md, totals = render_summary_md(
-        pr=args.pr, by_kind=by_kind, kinds=kinds, engines=engines, runs_planned=args.runs
+    rendered: RenderedSummary = render_summary_md(
+        pr_number=args.pr, by_kind=by_kind, kinds=kinds, engines=engines, runs_planned=args.runs
     )
-    (bundle / "summary.md").write_text(summary_md)
-    (bundle / "summary.json").write_text(
-        json.dumps(
-            {
-                "pr": args.pr,
-                "engines": engines,
-                "totals": totals,
-                "per_kind": {
-                    k: serialize_kind_for_json(info=by_kind[k], engines=engines)
-                    for k in kinds
-                    if k in by_kind
-                },
-            },
-            indent=2,
-        )
-    )
+    (bundle / "summary.md").write_text(rendered.markdown)
+
+    summary_obj: dict = {
+        "pr": args.pr,
+        "engines": engines,
+        "totals": rendered.totals,
+        "per_kind": {
+            kind: serialize_kind_for_json(info=by_kind[kind], engines=engines)
+            for kind in kinds
+            if kind in by_kind
+        },
+    }
+    (bundle / "summary.json").write_text(json.dumps(summary_obj, indent=2))
+
     for kind in kinds:
-        info = by_kind.get(kind)
+        info: KindResult | None = by_kind.get(kind)
         if info is None or not info.union_findings:
             continue
-        (bundle / f"detail-{kind}.md").write_text(
-            render_detail_md(pr=args.pr, kind=kind, info=info, engines=engines)
-        )
+        detail_md: str = render_detail_md(pr_number=args.pr, kind=kind, info=info, engines=engines)
+        (bundle / f"detail-{kind}.md").write_text(detail_md)
 
     print(
         f"aggregate: engines={','.join(engines)} kinds={','.join(kinds)} "
-        f"total_blockers={totals.get('blocker', 0)}",
+        f"total_blockers={rendered.totals.get('blocker', 0)}",
         file=sys.stderr,
     )
     return 0

@@ -61,13 +61,17 @@ to its module name using these rules (first match wins):
 |-------------------------------|--------------------------|
 | `skills/<x>/...`              | `skills/<x>`             |
 | `crates/<x>/...`              | `crates/<x>`             |
-| `docs/agents/...`             | `docs/agents`            |
+| `docs/<x>/...`                | `docs/<x>`               |
 | `scripts/...`                 | `scripts`                |
 | `v1_orchestrator/...`         | `v1_orchestrator`        |
 | `v2_design/...`               | `v2_design`              |
 | `tests/...`                   | `tests`                  |
 | `.github/...`                 | `.github`                |
 | (anything else at repo root)  | `root`                   |
+
+`root` is an intentional catch-all for repo-wide config / meta files
+(`Cargo.toml`, `README.md`, `CLAUDE.md`, install scripts, etc.) — a PR
+touching only `Cargo.toml` will write to `modules/root/LESSONS.md`.
 
 LESSONS files land at `modules/<name>/LESSONS.md`. Slashes in `<name>` become
 directories (e.g. `skills/distill-lessons` → `modules/skills/distill-lessons/LESSONS.md`).
@@ -86,6 +90,11 @@ With write (default): `modules/<name>/LESSONS.md` is overwritten with the
 proposed content (the old version remains in git history).
 
 With `--no-write`: only the bundle dir is touched.
+
+If after revision a module has no surviving + no new rules, the prompt
+emits the sentinel `_(no lessons yet)_` as the file body — meaning
+*reviewed, currently empty* (distinct from a missing file, which means
+*never distilled*).
 
 ## Distill prompt
 

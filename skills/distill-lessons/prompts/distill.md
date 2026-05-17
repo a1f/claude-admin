@@ -74,8 +74,9 @@ Rules of thumb:
   pointer like `(PR #29)`), but keep the rule itself short.
 - One sentence per rule. One blank line between rules.
 - Group rules under H2 sections if the file grows past ~10 rules — `##
-  Testing`, `## Style`, `## Build/CI`, etc. Below that, a flat bulleted list
-  is fine.
+  Testing`, `## Style`, `## Build/CI`, or any module-appropriate grouping
+  (a `skills/<x>` module might use `## Prompt`, `## Orchestrator`).
+  Below ~10 rules, a flat bulleted list is fine.
 - Don't include a "Changelog" or "Updated 2026-05-17" header. Git history
   has the chronology. LESSONS is current state.
 

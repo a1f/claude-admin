@@ -300,6 +300,9 @@ the file body."
            < /dev/null \
            > "$log_out" 2> "$log_err" \
       || {
+           # Stage 7 keys off FAILED_FLAGS[$i] (not the log contents) -- this
+           # stub is only here for human debugging if someone tails the log.
+           # NEVER copy this file to the live LESSONS.md.
            echo "_(distill subprocess errored -- see logs/distill-${safe}.err)_" > "$log_out"
            exit 1
          }
@@ -366,8 +369,11 @@ m = re.match(r"^```[^\n]*\n(.*?)\n```\s*$", text, flags=re.DOTALL)
 if m:
     text = m.group(1).strip() + "\n"
 # Reject HTML escape vectors that could pivot future LLM readers.
-if re.search(r"<\s*(script|iframe|style|object|embed)\b", text, flags=re.IGNORECASE):
-    text = "_(distill rejected -- output contained raw HTML tags)_\n"
+# Broad denylist: any of the high-risk HTML tag names. Markdown-only
+# lessons don't need raw HTML; if they ever do, narrow this case-by-case.
+if re.search(r"<\s*(script|iframe|style|object|embed|svg|img|meta|link|form|a\s+[^>]*href\s*=\s*['\"]?javascript:)",
+             text, flags=re.IGNORECASE):
+    text = "_(distill rejected -- output contained raw HTML / javascript: tag)_\n"
 elif len(text.encode("utf-8")) > max_bytes:
     text = "_(distill rejected -- output exceeded {} bytes)_\n".format(max_bytes)
 elif not text.strip():
@@ -380,10 +386,12 @@ PY
 
   proposed_size=$(wc -c <"$proposed" | tr -d ' ')
 
-  # Rejected-content sentinels -> never written to live tree.
+  # Rejected-content sentinels -> never written to live tree. We don't
+  # interpolate the rejection text (it's attacker-influenced); the file
+  # path is enough for the reader to inspect.
   if grep -qE '^_\(distill rejected' "$proposed" 2>/dev/null; then
     SKIPPED=$((SKIPPED + 1))
-    warn "  ${module}: $(cat "$proposed") -- live LESSONS.md left untouched"
+    warn "  ${module}: distiller output rejected -- see ${proposed}"
     continue
   fi
 

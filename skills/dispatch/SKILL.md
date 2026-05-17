@@ -75,6 +75,6 @@ The coder runs with a curated `--allowedTools` whitelist (Read/Edit/Write + Bash
 
 ## Notes
 
-- The coder skill (`~/.claude/skills/coder/SKILL.md`) is appended to the system prompt if it exists; falls back to inlined coder rules if absent.
+- The dispatched-coder skill (`~/.claude/skills/coder-dispatch/SKILL.md`) is appended to the system prompt if it exists; falls back to inlined coder rules if absent. (The separate `/coder` skill is the user-invoked HITL flow — not used here.)
 - The coder is told **not** to ask questions: document open items in the PR body and proceed. Mid-run question routing is a v2 enhancement (uses `--input-format stream-json --replay-user-messages`).
 - This skill never modifies main-branch state. Worktrees + branches are isolated.

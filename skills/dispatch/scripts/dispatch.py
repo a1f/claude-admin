@@ -40,7 +40,7 @@ REGISTRY = Path.home() / ".claude" / "plans" / "registry.json"
 WORK_ROOT = Path.home() / ".work" / "dispatches"
 WORKTREES_ROOT = Path.home() / "dev" / "claude-admin-worktrees"
 WATCHER_PATH = Path(__file__).parent / "watcher.py"
-CODER_SKILL_PATH = Path.home() / ".claude" / "skills" / "coder" / "SKILL.md"
+CODER_SKILL_PATH = Path.home() / ".claude" / "skills" / "coder-dispatch" / "SKILL.md"
 
 # Whitelist for the coder's tool use. Anything outside this triggers
 # permission_denied events visible in log.jsonl.
@@ -410,7 +410,7 @@ def main() -> int:
     if CODER_SKILL_PATH.exists():
         raw = CODER_SKILL_PATH.read_text()
         coder_skill_block = strip_frontmatter(raw)
-        system_prompt_source = "from ~/.claude/skills/coder/SKILL.md"
+        system_prompt_source = "from ~/.claude/skills/coder-dispatch/SKILL.md"
     else:
         coder_skill_block = CODER_RULES_INLINE
         system_prompt_source = "inline (coder skill not yet built)"

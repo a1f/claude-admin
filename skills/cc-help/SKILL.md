@@ -37,7 +37,7 @@ python3 <repo>/skills/cc-help/scripts/render.py
 ## Tests
 
 ```bash
-python3 -m unittest discover -s skills/cc-help/tests
+pytest skills/cc-help/tests
 ```
 
 Covers V1 (`output contains 'architector'`) and V10 (`all 9 steps in order,

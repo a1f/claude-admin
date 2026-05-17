@@ -1,20 +1,17 @@
-#!/usr/bin/env python3
-"""Unit tests for the /cc-help renderer.
+"""Pytest suite for the /cc-help renderer.
 
-Covers V1 (pipeline output mentions 'architector') and V10 (all 9 pipeline
-steps render in order, each with a non-empty one-line purpose).
+Locks down V1 (output mentions 'architector') and V10 (all 9 steps in order,
+each with a one-line purpose) so future edits to render.py can't silently
+break the visible /cc-help contract.
 """
-
-from __future__ import annotations
 
 import re
 import sys
-import tempfile
-import unittest
 from pathlib import Path
 
-# Make `render` importable without polluting sys.path globally.
-_SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+import pytest
+
+_SCRIPTS: Path = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
 
 import render  # noqa: E402  (sys.path tweak above)
@@ -23,13 +20,12 @@ from render import (  # noqa: E402
     PIPELINE,
     one_line,
     parse_frontmatter,
+    render as render_pipeline,
 )
-from render import render as render_pipeline  # noqa: E402
 
-
-# Skills that exist today (M1-S1 baseline). Used to build a realistic fake
-# skills/ dir for the integration-ish render tests.
-_INSTALLED_TODAY = {
+# A realistic subset of what's actually installed at the M1-S1 baseline.
+# Kept here (not in render.py) so prod constants don't carry test fixtures.
+_INSTALLED_TODAY: dict[str, str] = {
     "coder": "Internal skill loaded by /dispatch. Defines the coder agent.",
     "critic": "Internal skill loaded by the watcher when fanning out critiques.",
     "pr-babysit": "User-facing skill for the post-review decision.",
@@ -37,131 +33,128 @@ _INSTALLED_TODAY = {
 }
 
 
-def _build_fake_skills(root: Path, installed: dict[str, str]) -> None:
-    """Create `<root>/<name>/SKILL.md` files with the given descriptions."""
-    for name, desc in installed.items():
-        (root / name).mkdir(parents=True, exist_ok=True)
-        (root / name / "SKILL.md").write_text(
+@pytest.fixture
+def fake_skills(tmp_path: Path) -> Path:
+    """Mirrors today's installed-vs-planned mix so render() exercises both paths."""
+    for name, desc in _INSTALLED_TODAY.items():
+        skill_dir: Path = tmp_path / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
             f'---\nname: {name}\ndescription: "{desc}"\n---\n\nbody\n',
             encoding="utf-8",
         )
+    return tmp_path
 
 
-class TestParseFrontmatter(unittest.TestCase):
-    def test_extracts_quoted_description(self) -> None:
-        text = '---\nname: foo\ndescription: "hello world"\n---\n\nbody'
-        self.assertEqual(parse_frontmatter(text)["description"], "hello world")
-
-    def test_extracts_unquoted_description(self) -> None:
-        text = "---\nname: foo\ndescription: hello world\n---\n"
-        self.assertEqual(parse_frontmatter(text)["description"], "hello world")
-
-    def test_extracts_single_quoted(self) -> None:
-        text = "---\nname: foo\ndescription: 'hi there'\n---\n"
-        self.assertEqual(parse_frontmatter(text)["description"], "hi there")
-
-    def test_no_frontmatter_returns_empty(self) -> None:
-        self.assertEqual(parse_frontmatter("just body text\n"), {})
-
-    def test_unterminated_frontmatter_returns_empty(self) -> None:
-        self.assertEqual(parse_frontmatter("---\nname: foo\nbody\n"), {})
+# ----- parse_frontmatter -------------------------------------------------
 
 
-class TestOneLine(unittest.TestCase):
-    def test_first_sentence(self) -> None:
-        self.assertEqual(
-            one_line("Do this thing. Then do another. And another."),
-            "Do this thing",
-        )
-
-    def test_no_period_returns_whole(self) -> None:
-        self.assertEqual(one_line("just one line"), "just one line")
-
-    def test_period_at_end_only(self) -> None:
-        self.assertEqual(one_line("just one sentence."), "just one sentence")
-
-    def test_empty_input(self) -> None:
-        self.assertEqual(one_line(""), "")
+def test_parse_frontmatter_extracts_quoted_description() -> None:
+    text: str = '---\nname: foo\ndescription: "hello world"\n---\n\nbody'
+    assert parse_frontmatter(text=text)["description"] == "hello world"
 
 
-class TestRenderOutput(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.skills = Path(self._tmp.name)
-        _build_fake_skills(self.skills, _INSTALLED_TODAY)
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    # --- V1 -------------------------------------------------------------
-    def test_v1_output_mentions_architector(self) -> None:
-        """V1 proxy: rendered pipeline contains 'architector'."""
-        out = render_pipeline(self.skills)
-        self.assertIn("architector", out)
-
-    # --- V10 ------------------------------------------------------------
-    def test_v10_pipeline_has_exactly_nine_steps(self) -> None:
-        """V10: PRD declares 9 ordered pipeline steps."""
-        self.assertEqual(len(PIPELINE), 9)
-
-    def test_v10_all_nine_steps_appear_in_order(self) -> None:
-        """V10: every pipeline step appears, in declared order."""
-        out = render_pipeline(self.skills)
-        positions = [out.find(f"/{name}") for name in PIPELINE]
-        for name, pos in zip(PIPELINE, positions, strict=True):
-            self.assertGreater(pos, -1, f"missing /{name} in output")
-        self.assertEqual(
-            positions,
-            sorted(positions),
-            f"steps out of order: {positions}",
-        )
-
-    def test_v10_each_step_has_one_line_purpose(self) -> None:
-        """V10: every step renders with a non-empty one-line purpose."""
-        out = render_pipeline(self.skills)
-        for i, name in enumerate(PIPELINE, start=1):
-            # Line shape: "<n>. /<name>...  -  <purpose>[  (planned)]"
-            pattern = rf"^\s*{i}\.\s+/{re.escape(name)}\s+-\s+(.+)$"
-            match = re.search(pattern, out, re.MULTILINE)
-            self.assertIsNotNone(match, f"no line for step {i} /{name}")
-            assert match is not None  # for type checker
-            purpose = match.group(1).strip()
-            # Strip the optional planned marker before asserting non-empty.
-            purpose_clean = purpose.removesuffix("(planned)").strip()
-            self.assertTrue(
-                purpose_clean,
-                f"empty purpose for step {i} /{name}",
-            )
-
-    # --- behavioural --------------------------------------------------
-    def test_installed_skill_uses_frontmatter_description(self) -> None:
-        out = render_pipeline(self.skills)
-        # 'coder' is installed in the fake dir with our test description.
-        self.assertIn("Internal skill loaded by /dispatch", out)
-
-    def test_missing_skill_uses_fallback_with_planned_marker(self) -> None:
-        out = render_pipeline(self.skills)
-        # 'review' is NOT installed; must show fallback + (planned).
-        review_lines = [ln for ln in out.splitlines() if "/review " in ln + " "]
-        self.assertEqual(
-            len(review_lines), 1, f"expected one /review line, got: {review_lines}"
-        )
-        line = review_lines[0]
-        self.assertIn("(planned)", line)
-        self.assertIn(FALLBACK_DESCRIPTIONS["review"], line)
-
-    def test_fallback_descriptions_cover_every_pipeline_step(self) -> None:
-        """No pipeline step may be missing a fallback (would crash on render)."""
-        for name in PIPELINE:
-            self.assertIn(name, FALLBACK_DESCRIPTIONS)
-
-    def test_render_against_repo_skills_dir_smoke(self) -> None:
-        """Smoke: rendering against the real repo skills dir doesn't crash."""
-        repo_skills = Path(render.__file__).resolve().parent.parent.parent
-        out = render_pipeline(repo_skills)
-        self.assertIn("architector", out)
-        self.assertIn("/coder", out)
+def test_parse_frontmatter_extracts_unquoted_description() -> None:
+    text: str = "---\nname: foo\ndescription: hello world\n---\n"
+    assert parse_frontmatter(text=text)["description"] == "hello world"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_parse_frontmatter_extracts_single_quoted() -> None:
+    text: str = "---\nname: foo\ndescription: 'hi there'\n---\n"
+    assert parse_frontmatter(text=text)["description"] == "hi there"
+
+
+def test_parse_frontmatter_no_frontmatter_returns_empty() -> None:
+    assert parse_frontmatter(text="just body text\n") == {}
+
+
+def test_parse_frontmatter_unterminated_returns_empty() -> None:
+    assert parse_frontmatter(text="---\nname: foo\nbody\n") == {}
+
+
+# ----- one_line ----------------------------------------------------------
+
+
+def test_one_line_takes_first_sentence() -> None:
+    assert one_line(description="Do this thing. Then another.") == "Do this thing"
+
+
+def test_one_line_no_period_returns_whole() -> None:
+    assert one_line(description="just one line") == "just one line"
+
+
+def test_one_line_period_at_end_only() -> None:
+    assert one_line(description="just one sentence.") == "just one sentence"
+
+
+def test_one_line_empty_input() -> None:
+    assert one_line(description="") == ""
+
+
+# ----- V1 ---------------------------------------------------------------
+
+
+def test_v1_output_mentions_architector(fake_skills: Path) -> None:
+    """V1 proxy: the e2e gate `claude -p '/cc-help' | grep architector` must pass."""
+    out: str = render_pipeline(skills_dir=fake_skills)
+    assert "architector" in out
+
+
+# ----- V10 --------------------------------------------------------------
+
+
+def test_v10_pipeline_has_exactly_nine_steps() -> None:
+    """V10 starts with the PRD-declared count: 9 pipeline steps, not 8 or 10."""
+    assert len(PIPELINE) == 9
+
+
+def test_v10_all_nine_steps_appear_in_declared_order(fake_skills: Path) -> None:
+    """V10: each step appears exactly once, in PIPELINE order."""
+    out: str = render_pipeline(skills_dir=fake_skills)
+    positions: list[int] = [out.find(f"/{name}") for name in PIPELINE]
+    for name, pos in zip(PIPELINE, positions, strict=True):
+        assert pos > -1, f"missing /{name} in output"
+    assert positions == sorted(positions), f"steps out of order: {positions}"
+
+
+def test_v10_each_step_has_one_line_purpose(fake_skills: Path) -> None:
+    """V10: every step row has a non-empty purpose after the ` - ` separator."""
+    out: str = render_pipeline(skills_dir=fake_skills)
+    for i, name in enumerate(PIPELINE, start=1):
+        pattern: str = rf"^\s*{i}\.\s+/{re.escape(name)}\s+-\s+(.+)$"
+        match: re.Match[str] | None = re.search(pattern, out, re.MULTILINE)
+        assert match is not None, f"no row for step {i} /{name}"
+        # Drop optional `(planned)` suffix before checking the purpose is non-empty.
+        purpose_clean: str = match.group(1).strip().removesuffix("(planned)").strip()
+        assert purpose_clean, f"empty purpose for step {i} /{name}"
+
+
+# ----- behavioural ------------------------------------------------------
+
+
+def test_installed_skill_uses_frontmatter_description(fake_skills: Path) -> None:
+    out: str = render_pipeline(skills_dir=fake_skills)
+    assert "Internal skill loaded by /dispatch" in out
+
+
+def test_missing_skill_uses_fallback_with_planned_marker(fake_skills: Path) -> None:
+    out: str = render_pipeline(skills_dir=fake_skills)
+    review_lines: list[str] = [ln for ln in out.splitlines() if "/review " in ln + " "]
+    assert len(review_lines) == 1, f"expected one /review line, got: {review_lines}"
+    line: str = review_lines[0]
+    assert "(planned)" in line
+    assert FALLBACK_DESCRIPTIONS["review"] in line
+
+
+def test_fallback_descriptions_cover_every_pipeline_step() -> None:
+    """Render would KeyError if any pipeline name lacked a fallback — fail fast here."""
+    for name in PIPELINE:
+        assert name in FALLBACK_DESCRIPTIONS
+
+
+def test_render_against_real_repo_skills_dir_does_not_crash() -> None:
+    """Catches regressions where a real SKILL.md format change breaks the parser."""
+    repo_skills: Path = Path(render.__file__).resolve().parent.parent.parent
+    out: str = render_pipeline(skills_dir=repo_skills)
+    assert "architector" in out
+    assert "/coder" in out

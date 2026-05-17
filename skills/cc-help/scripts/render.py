@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Render the claude-admin M1 pipeline reference.
+"""Renderer that the /cc-help skill prints verbatim.
 
-Enumerates the 9 pipeline skills (in order), pulls the one-line purpose from
-each skill's SKILL.md frontmatter `description` field, and prints a compact
-text reference. Skills not yet installed render with a `(planned)` marker so
-the user can see what's still coming.
+A newcomer cloning the repo runs `./install.sh` then `/cc-help`; this script
+is what the skill executes to produce that 30-second pipeline overview. Lives
+in scripts/ (next to the SKILL.md) so the skill can locate it via $BASH_SOURCE.
 """
-
-from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Final
 
-# The 9-step M1 pipeline (PRD #16 G1 / V10). Order matters.
-PIPELINE: list[str] = [
+# Declared order = display order. PRD #16 G1 / slice issue #17 V10 say the
+# output must list these 9 names in this exact sequence.
+PIPELINE: Final[tuple[str, ...]] = (
     "roadmap-plan",
     "milestone",
     "to-issues",
@@ -23,11 +22,12 @@ PIPELINE: list[str] = [
     "critic",
     "pr-babysit",
     "distill-lessons",
-]
+)
 
-# Used when a pipeline skill is not yet installed (no SKILL.md found),
-# or when its frontmatter has no usable `description`.
-FALLBACK_DESCRIPTIONS: dict[str, str] = {
+# Used when a pipeline skill's SKILL.md doesn't exist yet (slice not shipped)
+# or its frontmatter description is empty. Keeping the (planned) entries
+# informative lets /cc-help double as a "what's still coming" reference.
+FALLBACK_DESCRIPTIONS: Final[dict[str, str]] = {
     "roadmap-plan": "Plan the roadmap: high-level milestones for a multi-month effort",
     "milestone": "Turn one milestone into a PRD with deliverables + validations",
     "to-issues": "Break a PRD into vertical-slice issues with enriched context",
@@ -40,20 +40,14 @@ FALLBACK_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-def parse_frontmatter(text: str) -> dict[str, str]:
-    """Return key→value from YAML-ish frontmatter (single-line scalars only).
-
-    Handles `key: value` and `key: "value"` / `key: 'value'`. Multi-line
-    values, lists, and nested maps are out of scope — pipeline SKILL.md
-    descriptions are always single-line scalars.
-    """
+def parse_frontmatter(*, text: str) -> dict[str, str]:
+    """Extracted standalone so /cc-help stays stdlib-only (no PyYAML dependency)."""
     if not text.startswith("---"):
         return {}
-    # Find the closing `---` line.
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}
-    end = -1
+    end: int = -1
     for i in range(1, len(lines)):
         if lines[i].strip() == "---":
             end = i
@@ -62,13 +56,13 @@ def parse_frontmatter(text: str) -> dict[str, str]:
         return {}
     out: dict[str, str] = {}
     for line in lines[1:end]:
-        stripped = line.strip()
+        stripped: str = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         if ":" not in stripped:
             continue
         key, _, value = stripped.partition(":")
-        v = value.strip()
+        v: str = value.strip()
         if (v.startswith('"') and v.endswith('"')) or (
             v.startswith("'") and v.endswith("'")
         ):
@@ -77,48 +71,48 @@ def parse_frontmatter(text: str) -> dict[str, str]:
     return out
 
 
-def one_line(description: str) -> str:
-    """Take the first sentence of `description` (cuts at '. ' or '.\\n')."""
+def one_line(*, description: str) -> str:
+    """Pipeline rows must fit on one terminal line — trim to first sentence."""
     if not description:
         return ""
-    # Cut at first sentence boundary.
     for sep in (". ", ".\n"):
-        idx = description.find(sep)
+        idx: int = description.find(sep)
         if idx != -1:
             return description[:idx].rstrip()
     return description.rstrip().rstrip(".")
 
 
-def render(skills_dir: Path) -> str:
-    """Render the pipeline reference as a multi-line string."""
-    header = "claude-admin M1 pipeline (9 steps)"
+def render(*, skills_dir: Path) -> str:
+    """Output is printed verbatim by the skill — formatting changes are user-visible."""
+    header: str = "claude-admin M1 pipeline (9 steps)"
     lines: list[str] = [header, "=" * len(header), ""]
-    width = max(len(name) for name in PIPELINE) + 1  # +1 for the leading '/'
+    width: int = max(len(name) for name in PIPELINE) + 1  # +1 for leading '/'
     for i, name in enumerate(PIPELINE, start=1):
-        skill_path = skills_dir / name / "SKILL.md"
-        marker = ""
-        desc = ""
+        skill_path: Path = skills_dir / name / "SKILL.md"
+        marker: str = ""
+        desc: str = ""
         if skill_path.is_file():
-            fm = parse_frontmatter(skill_path.read_text(encoding="utf-8"))
-            desc = one_line(fm.get("description", ""))
+            fm: dict[str, str] = parse_frontmatter(text=skill_path.read_text(encoding="utf-8"))
+            desc = one_line(description=fm.get("description", ""))
         if not desc:
             desc = FALLBACK_DESCRIPTIONS[name]
             marker = "  (planned)"
-        slot = f"/{name}".ljust(width)
+        slot: str = f"/{name}".ljust(width)
         lines.append(f"{i:>2}. {slot}  - {desc}{marker}")
     lines.append("")
     return "\n".join(lines)
 
 
 def _default_skills_dir() -> Path:
-    """`<repo>/skills/` — render.py lives at `<repo>/skills/cc-help/scripts/`."""
+    """Self-locate so the skill works regardless of where claude is invoked from."""
     return Path(__file__).resolve().parent.parent.parent
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    skills_dir = Path(args[0]) if args else _default_skills_dir()
-    print(render(skills_dir))
+def main(*, argv: list[str] | None = None) -> int:
+    """Optional argv lets tests render against a fake skills dir."""
+    args: list[str] = list(sys.argv[1:] if argv is None else argv)
+    skills_dir: Path = Path(args[0]) if args else _default_skills_dir()
+    print(render(skills_dir=skills_dir))
     return 0
 
 

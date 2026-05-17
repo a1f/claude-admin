@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /review skill orchestrator.
+# /cc-review skill orchestrator.
 #
 # Usage:
 #   run.sh <PR#> [--kinds=k1,k2,...] [--runs=N] [--engine=claude|codex|both]
@@ -18,8 +18,8 @@
 
 set -eo pipefail
 
-die()  { echo "review: $*" >&2; exit 1; }
-warn() { echo "review: $*" >&2; }
+die()  { echo "cc-review: $*" >&2; exit 1; }
+warn() { echo "cc-review: $*" >&2; }
 
 PR_NUM=""
 KINDS="bugs,quality,architecture,tests,bulletproof"
@@ -73,16 +73,16 @@ if [[ -n "$BUNDLE" ]]; then
   [[ -f "$BUNDLE/pr-diff.patch" ]] || die "bundle missing pr-diff.patch"
   [[ -f "$BUNDLE/pr-context.md" ]] || die "bundle missing pr-context.md"
   PR_NUM="${PR_NUM:-offline}"
-  echo "review: using provided bundle = $BUNDLE" >&2
+  echo "cc-review: using provided bundle = $BUNDLE" >&2
 else
   [[ -n "$PR_NUM" ]] || die "PR number required (or use --bundle DIR)"
   command -v gh >/dev/null || die "gh CLI required for PR mode"
   BUNDLE_BUILDER="${SKILL_REPO_ROOT}/scripts/build-pr-bundle.sh"
   [[ -x "$BUNDLE_BUILDER" ]] || die "expected bundle builder at $BUNDLE_BUILDER"
-  echo "review: building context bundle for PR #${PR_NUM}..." >&2
+  echo "cc-review: building context bundle for PR #${PR_NUM}..." >&2
   BUNDLE="$("$BUNDLE_BUILDER" "$PR_NUM" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"})"
   [[ -d "$BUNDLE" ]] || die "bundle builder did not produce a directory"
-  echo "review: bundle = $BUNDLE" >&2
+  echo "cc-review: bundle = $BUNDLE" >&2
 fi
 mkdir -p "$BUNDLE/logs"
 
@@ -165,26 +165,26 @@ independently. Score what YOU see."
 
       PIDS+=("$!")
       LABELS+=("${engine}/${kind}/${run}")
-      echo "review: spawned ${engine} ${kind} run ${run} → pid $!  log=$log" >&2
+      echo "cc-review: spawned ${engine} ${kind} run ${run} → pid $!  log=$log" >&2
     done
   done
 done
 
 # ---------- 5. Wait ----------
-echo "review: waiting for ${#PIDS[@]} reviewer subprocess(es)..." >&2
+echo "cc-review: waiting for ${#PIDS[@]} reviewer subprocess(es)..." >&2
 FAIL_COUNT=0
 for i in "${!PIDS[@]}"; do
   if wait "${PIDS[$i]}"; then
-    echo "review:   ${LABELS[$i]} done" >&2
+    echo "cc-review:   ${LABELS[$i]} done" >&2
   else
-    echo "review:   ${LABELS[$i]} FAILED (see .err)" >&2
+    echo "cc-review:   ${LABELS[$i]} FAILED (see .err)" >&2
     FAIL_COUNT=$((FAIL_COUNT + 1))
   fi
 done
 [[ "$FAIL_COUNT" -gt 0 ]] && warn "${FAIL_COUNT} subprocess(es) failed; aggregator will include any partial output and skip the rest"
 
 # ---------- 6. Aggregate ----------
-echo "review: aggregating findings..." >&2
+echo "cc-review: aggregating findings..." >&2
 python3 "${SKILL_DIR}/scripts/aggregate.py" \
   --bundle "$BUNDLE" \
   --pr "$PR_NUM" \
@@ -197,21 +197,21 @@ SUMMARY="${BUNDLE}/summary.md"
 
 # ---------- 7. Post (unless --no-post) ----------
 if [[ "$NO_POST" -eq 1 ]]; then
-  echo "review: --no-post set; skipping PR comments" >&2
-  echo "review: done. Bundle preserved at $BUNDLE" >&2
+  echo "cc-review: --no-post set; skipping PR comments" >&2
+  echo "cc-review: done. Bundle preserved at $BUNDLE" >&2
   echo "$SUMMARY"
   exit 0
 fi
 
-echo "review: posting summary comment to PR #${PR_NUM}..." >&2
+echo "cc-review: posting summary comment to PR #${PR_NUM}..." >&2
 SUMMARY_URL=$(gh pr comment "$PR_NUM" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --body-file "$SUMMARY")
-echo "review:   summary comment: $SUMMARY_URL" >&2
+echo "cc-review:   summary comment: $SUMMARY_URL" >&2
 
 for kind in "${KIND_LIST[@]}"; do
   detail="${BUNDLE}/detail-${kind}.md"
   if [[ -s "$detail" ]]; then
     url=$(gh pr comment "$PR_NUM" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --body-file "$detail")
-    echo "review:   ${kind} detail comment: $url" >&2
+    echo "cc-review:   ${kind} detail comment: $url" >&2
   fi
 done
 
@@ -221,10 +221,10 @@ if [[ "$BLOCKER_TOTAL" -gt 0 ]]; then
   gh label create CRITICAL --color B60205 --description "Reviewer found a blocker" \
     ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} 2>/dev/null || true
   gh pr edit "$PR_NUM" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --add-label CRITICAL >/dev/null
-  echo "review:   CRITICAL label applied (${BLOCKER_TOTAL} blocker(s))" >&2
+  echo "cc-review:   CRITICAL label applied (${BLOCKER_TOTAL} blocker(s))" >&2
 else
-  echo "review:   no blockers; CRITICAL label not applied" >&2
+  echo "cc-review:   no blockers; CRITICAL label not applied" >&2
 fi
 
-echo "review: done. Bundle preserved at $BUNDLE" >&2
+echo "cc-review: done. Bundle preserved at $BUNDLE" >&2
 echo "$SUMMARY_URL"

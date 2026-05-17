@@ -1,10 +1,10 @@
 ---
-name: review
-description: "Multi-agent PR review via Claude and/or Codex. Fans out parallel reviewers across 5 kinds (bugs, quality, architecture, tests, bulletproof) and 1 or 2 engines, aggregates with cross-engine dedup, posts a side-by-side summary table + per-kind detail comments (each finding tagged with the engine(s) that flagged it), and applies a CRITICAL label if any blocker is found. Use when the user asks to /review a PR, multi-review a PR, or wants reviewer agents to look at a published PR. Examples: '/review 26', '/review 26 --kinds=bugs,tests', '/review 26 --engine=both', '/review 26 --runs=1'."
+name: cc-review
+description: "Multi-agent PR review via Claude and/or Codex. Fans out parallel reviewers across 5 kinds (bugs, quality, architecture, tests, bulletproof) and 1 or 2 engines, aggregates with cross-engine dedup, posts a side-by-side summary table + per-kind detail comments (each finding tagged with the engine(s) that flagged it), and applies a CRITICAL label if any blocker is found. Named cc-review to avoid the built-in /review slash command. Use when the user asks to /cc-review a PR, multi-review a PR, or wants reviewer agents to look at a published PR. Examples: '/cc-review 26', '/cc-review 26 --kinds=bugs,tests', '/cc-review 26 --engine=both', '/cc-review 26 --runs=1'."
 argument-hint: "<PR#> [--kinds=...] [--runs=N] [--engine=claude|codex|both] [--bundle DIR] [--no-post] [--tmux]"
 ---
 
-# /review skill
+# /cc-review skill
 
 Multi-agent PR review. For one PR, fan out parallel reviewer subprocesses across
 multiple "kinds" (bugs, quality, architecture, tests, bulletproof), N independent
@@ -12,12 +12,15 @@ runs per kind per engine, using one or both of Claude and Codex. Aggregate per
 engine (deduped) and unioned across engines, post one summary comment plus one
 detail comment per kind. Apply `CRITICAL` label if any reviewer reports a blocker.
 
+Named `cc-review` to avoid colliding with Claude Code's built-in `/review` slash
+command.
+
 ## Usage
 
 ```
-/review <PR#> [--kinds=bugs,quality,architecture,tests,bulletproof]
-              [--runs=N] [--engine=claude|codex|both]
-              [--bundle DIR] [--no-post] [--tmux] [--repo OWNER/NAME]
+/cc-review <PR#> [--kinds=bugs,quality,architecture,tests,bulletproof]
+                 [--runs=N] [--engine=claude|codex|both]
+                 [--bundle DIR] [--no-post] [--tmux] [--repo OWNER/NAME]
 ```
 
 Defaults: `--kinds=bugs,quality,architecture,tests,bulletproof`, `--runs=3`, `--engine=claude`.
@@ -37,7 +40,7 @@ Use `--runs=1` or narrower `--kinds` for a cheaper pass.
 Hand the run off to the orchestration script — it does everything end-to-end:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/review}/scripts/run.sh" <PR#> [flags]
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/cc-review}/scripts/run.sh" <PR#> [flags]
 ```
 
 Show the script's output to the user verbatim. It prints:

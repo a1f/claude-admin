@@ -1,6 +1,6 @@
 ---
 name: critic
-description: "Multi-agent goal-fit critic for a PR via Claude and/or Codex. Fans out N parallel critic subprocesses per engine, each scoring the PR 1-100 on whether it actually achieves its stated task (not whether the code is well-written — that's /review). Aggregates median score per engine plus a cross-engine consensus, derives verdict from the median, unions concerns. Posts one summary comment to the PR. Use when the user asks to /critic a PR, get a goal-fit verdict on a PR, or check whether a PR matches its task. Examples: '/critic 26', '/critic 26 --engine=both', '/critic 26 --runs=5', '/critic --bundle /path/to/bundle --no-post'."
+description: "Multi-agent goal-fit critic for a PR via Claude and/or Codex. Fans out N parallel critic subprocesses per engine, each scoring the PR 1-100 on whether it actually achieves its stated task (not whether the code is well-written — that's /cc-review). Aggregates median score per engine plus a cross-engine consensus, derives verdict from the median, unions concerns. Posts one summary comment to the PR. Use when the user asks to /critic a PR, get a goal-fit verdict on a PR, or check whether a PR matches its task. Examples: '/critic 26', '/critic 26 --engine=both', '/critic 26 --runs=5', '/critic --bundle /path/to/bundle --no-post'."
 argument-hint: "<PR#> [--runs=N] [--engine=claude|codex|both] [--bundle DIR] [--no-post] [--repo OWNER/NAME]"
 ---
 
@@ -12,7 +12,7 @@ per engine (Claude and/or Codex). Each scores the PR 1–100 on the question:
 median, then a cross-engine consensus median; derive the verdict from the
 consensus; union the concerns; and post one summary comment to the PR.
 
-Goal-fit only. **Code quality is /review's job.** A messy implementation that
+Goal-fit only. **Code quality is /cc-review's job.** A messy implementation that
 meets the task gets a high critic score; a beautiful implementation that
 solves the wrong problem gets a low one.
 

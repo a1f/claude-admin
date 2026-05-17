@@ -222,7 +222,7 @@ def render_md(
     eng_label = " + ".join(ENGINE_LABEL.get(e, e) for e in engines)
     lines.append(
         f"_{eng_label} critic, {runs_planned} run(s) per engine. "
-        "Goal-fit only — code quality is /review's job._"
+        "Goal-fit only — code quality is /cc-review's job._"
     )
     lines.append("")
     emoji = VERDICT_EMOJI.get(consensus["verdict"], "·")

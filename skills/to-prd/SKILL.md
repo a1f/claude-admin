@@ -27,7 +27,15 @@ Check with the user that these modules match their expectations. Check with the 
 
    If the validator reports errors, fix them in the draft and re-run until it passes. Do NOT post a PRD that fails validation — every check exists to prevent the downstream pipeline (architector / critic / coder) from working off an ambiguous spec.
 
-5. Publish the validated PRD to the project issue tracker (see `docs/agents/issue-tracker.md`). Apply the `ready-for-agent` triage label — no need for additional triage.
+5. **Critique the draft** — dispatch the 3 agents below in parallel (single message, 3 Agent tool calls). Each returns a score 1-100 and a short list of concrete fixes. If any score is < 80, apply the fixes and re-critique. Do NOT publish until all three score ≥ 80.
+
+   Each agent receives: the draft PRD, the original user prompt that started this conversation, and the Q&A transcript from the grilling step (paste them verbatim into the prompt).
+
+   - **Agent A — prompt fidelity.** Does the PRD actually deliver what the user asked for in the original prompt? Score 1-100. List anything in the prompt that is missing, watered down, or silently expanded.
+   - **Agent B — Q&A fidelity.** Does the PRD reflect every decision made in the Q&A? Score 1-100. List any Q&A answer that is contradicted, ignored, or only partially honored.
+   - **Agent C — structure & vertical slicing.** Are Deliverables observable, Validations tied to Gn, Modules concrete, Test plan substantive, and is each Gn a real vertical slice (not a horizontal layer)? Score 1-100. List structural weaknesses.
+
+6. Publish the validated and critiqued PRD to the project issue tracker (see `docs/agents/issue-tracker.md`). Apply the `ready-for-agent` triage label — no need for additional triage.
 
 ## Template
 

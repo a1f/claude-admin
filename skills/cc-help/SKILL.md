@@ -5,40 +5,33 @@ description: "Print the claude-admin M1 pipeline reference: 9 ordered steps with
 
 # /cc-help
 
-Entry-point reference for the claude-admin M1 pipeline. Renders the 9 ordered
-pipeline steps with a one-line purpose for each, pulled from every step's
-own SKILL.md frontmatter.
+Entry-point reference for the claude-admin M1 pipeline. Prints the 9 ordered
+pipeline steps with a one-line purpose each. A newcomer can clone the repo,
+run `./install.sh`, then `/cc-help` to see the exact pipeline in 30 seconds.
 
-## How to invoke
+## How to respond
 
-Run the renderer and print its output verbatim. Do not paraphrase, reorder, or
-omit steps -- this command exists so a newcomer can clone the repo and see the
-exact pipeline in 30 seconds.
+Print the block below verbatim. Do not paraphrase, reorder, or omit steps.
+Steps marked `(planned)` haven't shipped yet — leave the marker in place.
 
-```bash
-python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")/../scripts/render.py"
+```
+claude-admin M1 pipeline (9 steps)
+==================================
+
+ 1. /roadmap-plan     - Plan the roadmap: high-level milestones for a multi-month effort  (planned)
+ 2. /milestone        - Turn one milestone into a PRD with deliverables + validations  (planned)
+ 3. /to-issues        - Break a plan, spec, or PRD into independently-grabbable issues on the project issue tracker using tracer-bullet vertical slices
+ 4. /architector      - Per-slice runner: PR breakdown + plan-integrity owner  (planned)
+ 5. /coder            - Internal skill loaded by /dispatch as --append-system-prompt
+ 6. /review           - Post-publish code-quality + bugs review on a PR  (planned)
+ 7. /critic           - Internal skill loaded by the watcher when fanning out PR critiques
+ 8. /pr-babysit       - User-facing skill for the post-review decision on a dispatched task
+ 9. /distill-lessons  - Post-merge: append distilled rules to module LESSONS.md  (planned)
 ```
 
-Equivalent form when invoked from outside the skill directory:
+## Maintenance
 
-```bash
-python3 <repo>/skills/cc-help/scripts/render.py
-```
-
-## What the renderer does
-
-1. Walks `<repo>/skills/*/SKILL.md`.
-2. Filters to the 9 ordered pipeline skills (see `PIPELINE` in `scripts/render.py`).
-3. For each step, extracts the first sentence of the `description:` frontmatter
-   field and prints `<n>. /<name>  -  <one-line purpose>`.
-4. For pipeline skills not yet installed (the slice that builds them hasn't
-   shipped), prints the fallback purpose with a `(planned)` marker.
-
-## Tests
-
-```bash
-pytest skills/cc-help/tests
-```
-
-Covers V1 (`output contains 'architector'`) and V10 (`all 9 steps in order,
-each with a one-line purpose`).
+When a `(planned)` slice ships, drop the marker and update the one-liner from
+the new skill's frontmatter `description:` (first sentence). When an installed
+pipeline skill's description changes meaningfully, update the matching line
+here. Source of truth for each step's purpose is that step's own SKILL.md.

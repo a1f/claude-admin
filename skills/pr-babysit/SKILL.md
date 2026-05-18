@@ -11,10 +11,13 @@ comments + CI failures + merge conflicts, triage each signal into one of three
 dispatch tiers, fix or hand off, and repeat until the PR is `[READY TO MERGE]`,
 `[ESCALATED]` (to architector), or `[MAX ROUNDS EXHAUSTED]`.
 
-This is the S10 polling sibling of `/pr-decide` (the human terminal step).
 **Never** opens an `AskUserQuestion` gate — every "is this a judgment call?"
-signal goes to tier 3 (architect). For interactive review-summary + merge/drop
-decisions, use `/pr-decide` instead.
+signal goes to tier 3 (architect). After the loop exits, the human takes the
+terminal action with one of:
+
+- `gh pr merge <N> --squash --delete-branch` (on `[READY TO MERGE]`)
+- `gh pr close <N> --comment "<reason>"` (drop)
+- redispatch `/coder` with a focused fix-spec (after `[ESCALATED]`)
 
 ```
 /pr-babysit [--interval=3m] [--max-rounds=5] [--pr=NUM]
@@ -835,7 +838,5 @@ secrets).
   PR comments that /pr-babysit then triages.
 - `/critic` — same as /cc-review. Verdicts get routed by 1d.
 - `/diagnose` — invoked as an analysis-only subagent on CI red.
-- `/pr-decide` — the human terminal step. Run by the user after /pr-babysit
-  exits with `[READY TO MERGE]` or `[ESCALATED]`.
 - `/architector` (future, S12) — reads `architect-attention` issues; deals with
-  escalated PRs.
+  escalated PRs after a tier-3 escalation.

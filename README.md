@@ -40,7 +40,7 @@ Full architecture diagram in [`v1_orchestrator/00-final-plan.html`](v1_orchestra
 | `crates/ca-daemon/` | Daemon binary (placeholder until M1) |
 | `crates/ca/` | CLI entry for humans + architectors (placeholder until M1) |
 | `crates/ca-tui/` | ratatui client (placeholder until M7) |
-| `skills/` | Orchestrator skills: `breakdown`, `suggest`, `dispatch`, `coder`, `reviewer`, `critic`, `pr-babysit`, `pr-decide`, `improver`, `test-builder`, `revisit` |
+| `skills/` | Orchestrator skills: `breakdown`, `suggest`, `dispatch`, `coder`, `reviewer`, `critic`, `pr-babysit`, `improver`, `test-builder`, `revisit` |
 | `v1_orchestrator/` | Active ca_v1 plan + milestones + breakdowns |
 | `v2_design/` | Design brief + UI mocks for the eventual web admin |
 | `install.sh` / `uninstall.sh` | Discovery-based skill installer (symlinks `<repo>/skills/*` into `~/.claude/skills/`) |
@@ -84,13 +84,12 @@ The orchestrator skills:
 | `coder` | _Internal._ System prompt for the coder agent |
 | `reviewer` | _Internal._ System prompt for security / bugs / quality reviewer agents |
 | `critic` | _Internal._ System prompt for goal-fit critics (1-100 scoring) |
-| `/pr-babysit` | AFK polling loop: watch PR lifecycle, route bot/CI signals (tier-1 inline / tier-2 /coder / tier-3 architector), invoke /diagnose on CI red |
-| `/pr-decide` | Post-review human decision: ready / merge / drop / iterate |
+| `/pr-babysit` | AFK polling loop: watch PR lifecycle, route bot/CI signals (tier-1 inline / tier-2 /coder / tier-3 architector), invoke /diagnose on CI red. After it exits, merge with `gh pr merge <N> --squash --delete-branch` (READY) or read the slice issue (ESCALATED). |
 | `/improver` | Post-merge: refactor opportunities the coder couldn't take |
 | `/test-builder` | Post-merge: under-tested paths + scenarios to add |
 | `/revisit` | Post-merge: amendments to downstream plan |
 
-The user-invocable skills (`/breakdown`, `/suggest`, `/dispatch`, `/pr-babysit`, `/pr-decide`, `/improver`, `/test-builder`, `/revisit`) work today via shell + Python scripts. Their logic moves into the Rust workspace over M3–M9 of ca_v1.
+The user-invocable skills (`/breakdown`, `/suggest`, `/dispatch`, `/pr-babysit`, `/improver`, `/test-builder`, `/revisit`) work today via shell + Python scripts. Their logic moves into the Rust workspace over M3–M9 of ca_v1.
 
 ## Plans
 

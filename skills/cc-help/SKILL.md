@@ -65,7 +65,7 @@ the `(planned)` marker.
 | 5 | coder           | Implement one PR with plan-pr + write-pr + self-review |
 | 6 | review          | Post-publish code-quality + bugs review on a PR |
 | 7 | critic          | Post-publish "addresses task?" verdict (NOT quality) |
-| 8 | pr-babysit      | Watch PR lifecycle, route verdicts, diagnose on CI red |
+| 8 | pr-babysit      | AFK polling loop: triage CI + bot comments to tier-1 inline fix / tier-2 /coder / tier-3 architector; invoke /diagnose on CI red |
 | 9 | distill-lessons | Post-merge: append distilled rules to module LESSONS.md |
 
 ## Maintenance — read this before changing the pipeline

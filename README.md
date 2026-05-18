@@ -84,12 +84,12 @@ The orchestrator skills:
 | `coder` | _Internal._ System prompt for the coder agent |
 | `reviewer` | _Internal._ System prompt for security / bugs / quality reviewer agents |
 | `critic` | _Internal._ System prompt for goal-fit critics (1-100 scoring) |
-| `/pr-babysit` | Post-review human decision: ready / merge / drop / iterate |
+| `/pr-babysit` | AFK polling loop: watch PR lifecycle, route bot/CI signals (tier-1 inline / tier-2 /coder / tier-3 architector), invoke /diagnose on CI red. After it exits, merge with `gh pr merge <N> --squash --delete-branch` (READY) or read the slice issue (ESCALATED). |
 | `/improver` | Post-merge: refactor opportunities the coder couldn't take |
 | `/test-builder` | Post-merge: under-tested paths + scenarios to add |
 | `/revisit` | Post-merge: amendments to downstream plan |
 
-The user-invocable skills (`/breakdown`, `/suggest`, `/dispatch`, `/pr-babysit`, `/improver`, `/test-builder`, `/revisit`) work today via Python scripts. Their logic moves into the Rust workspace over M3–M9 of ca_v1.
+The user-invocable skills (`/breakdown`, `/suggest`, `/dispatch`, `/pr-babysit`, `/improver`, `/test-builder`, `/revisit`) work today via shell + Python scripts. Their logic moves into the Rust workspace over M3–M9 of ca_v1.
 
 ## Plans
 

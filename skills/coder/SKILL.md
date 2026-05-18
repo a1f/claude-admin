@@ -292,6 +292,7 @@ When Phase 4 is green:
 ## Task
 <task-ref> · <one-line title>
 <link to issue / plan task>
+Parent slice: #<slice-issue-number>
 
 ## What this PR does
 - <3-6 bullets of what shipped>
@@ -320,6 +321,19 @@ When Phase 4 is green:
 ```
 
 Any section with nothing to say: `_none_`.
+
+**`Parent slice: #N` is required** — `/pr-babysit` (S10) reads this header line
+to know which slice issue to escalate to. Resolve the slice issue number as
+follows:
+
+- If the task spec is a GH issue URL/number that is itself a slice issue (e.g.
+  `#17`), use that number.
+- If the task spec is a sub-task (e.g. `M0a-T1`), use the parent slice issue
+  from `plans/<plan>/breakdowns/<milestone>.md` or `~/.claude/plans/registry.json`.
+- If the spec is free-form with no clear parent, ask the user once at Phase 1
+  and store the answer in `plan.md`.
+
+Omitting the header leaves the PR un-babysittable (the loop bails at setup).
 
 ---
 

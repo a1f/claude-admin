@@ -175,18 +175,26 @@ trap 'rm -f "$PIDFILE"' EXIT INT TERM
 
 Independently, **acquire a worktree lock before any git mutation** (rebase,
 tier-1 commit, push). The same worktree may be in use by a /coder session
-dispatched in tier-2; concurrent index writes corrupt the repo:
+dispatched in tier-2; concurrent index writes corrupt the repo.
+
+Use a portable `mkdir`-based lock — `flock(1)` ships with util-linux and is
+absent from macOS by default, so it would silently fail on the stated platform.
+`mkdir` is atomic on every POSIX filesystem:
 
 ```bash
-WORKTREE_LOCK="$(git rev-parse --git-dir)/pr-babysit.lock"
+WORKTREE_LOCK_DIR="$(git rev-parse --git-dir)/pr-babysit.lock.d"
 acquire_worktree_lock() {
-  # exclusive flock; fails immediately if held by another /pr-babysit or
-  # /coder process.
-  exec 9>"$WORKTREE_LOCK"
-  flock -n 9 || { echo "worktree busy (likely /coder in tmux); deferring mutation"; return 1; }
+  if mkdir "$WORKTREE_LOCK_DIR" 2>/dev/null; then
+    # Record holder for diagnostic output if a future round finds the lock.
+    echo $$ > "$WORKTREE_LOCK_DIR/pid"
+    return 0
+  fi
+  local holder; holder=$(cat "$WORKTREE_LOCK_DIR/pid" 2>/dev/null || echo "unknown")
+  echo "worktree busy (lock held by pid $holder; likely /coder in tmux); deferring mutation"
+  return 1
 }
 release_worktree_lock() {
-  exec 9>&-
+  rm -rf "$WORKTREE_LOCK_DIR"
 }
 ```
 
@@ -194,6 +202,13 @@ Use `acquire_worktree_lock` / `release_worktree_lock` as a guard around 1g
 (tier-1 commit staging), 1i (rebase), and 1j (commit + push). If lock fails,
 SKIP the mutation this round, do NOT decrement `IDLE_ROUNDS_REMAINING` (we're
 deferring, not stalled), and try again next iteration.
+
+The trap on `EXIT INT TERM` set above for the pidfile also runs
+`release_worktree_lock` so an interrupted babysit can't leave a stale lock:
+
+```bash
+trap 'rm -f "$PIDFILE"; rm -rf "$WORKTREE_LOCK_DIR"' EXIT INT TERM
+```
 
 Three counters prevent infinite loops:
 
@@ -578,6 +593,16 @@ If `MERGE.mergeable == "CONFLICTING"` or `MERGE.mergeStateStatus == "DIRTY"`:
 
 ```bash
 acquire_worktree_lock || return 0  # defer this round
+
+# Capture the upstream SHA of THIS branch as we see it now, BEFORE the rebase
+# AND BEFORE any fetch of the feature branch. This is the lease guard for
+# 1j's force-with-lease — if /coder pushed a commit while we were rebasing,
+# the lease declines and the push fails loudly instead of clobbering them.
+BRANCH=$(git branch --show-current)
+PRE_REBASE_UPSTREAM_SHA=$(git rev-parse "refs/remotes/origin/$BRANCH" 2>/dev/null || echo "")
+
+# Now fetch the base branch (not the feature branch — fetching the feature
+# branch would refresh the lease ref and defeat the guard above).
 git fetch origin "$BASE_BRANCH"
 git rebase "origin/$BASE_BRANCH"
 ```
@@ -623,14 +648,24 @@ this round:
    push from /coder tier-2) must NOT escalate to force-push: that can clobber
    the human's in-flight work.
 
+   `--force-with-lease` MUST carry an **explicit expected SHA** captured BEFORE
+   the rebase. The default unqualified form compares against the local
+   remote-tracking ref (`refs/remotes/origin/<branch>`), which any preceding
+   `git fetch` of the same branch refreshes — that would silently turn the
+   lease into a no-op and clobber a /coder commit pushed during our rebase
+   window. The pre-rebase SHA was captured in 1i as `PRE_REBASE_UPSTREAM_SHA`.
+
+   Do NOT pre-fetch the feature branch here. The base branch fetch happens
+   inside 1i for the rebase itself; for the feature branch we want the stale
+   lease ref so the lease check is meaningful.
+
    ```bash
-   git fetch --quiet origin "$BASE_BRANCH"
+   BRANCH=$(git branch --show-current)
    if [[ "${DID_REBASE_THIS_ROUND:-false}" == "true" ]]; then
-     git fetch --quiet origin "$(git branch --show-current)" || true
-     git push --force-with-lease || {
-       echo "[PUSH FAILED after rebase — lease declined; remote moved]"
+     git push --force-with-lease="${BRANCH}:${PRE_REBASE_UPSTREAM_SHA}" || {
+       echo "[PUSH FAILED after rebase — lease declined; upstream moved past $PRE_REBASE_UPSTREAM_SHA]"
        release_worktree_lock
-       return 1  # let the loop decrement IDLE_ROUNDS_REMAINING
+       return 1  # decrement IDLE_ROUNDS_REMAINING; investigate next round
      }
    else
      git push || {
@@ -824,6 +859,8 @@ secrets).
 | Running two /pr-babysit on the same PR | Acquire `$STATE_DIR/babysit.pid` lock at startup; exit `[ALREADY RUNNING]` if held by a live pid. |
 | Concurrent worktree mutation with a /coder tmux session | `flock` on `$GIT_DIR/pr-babysit.lock` before any rebase / commit / push. Defer the round if held. |
 | `git push || git push --force-with-lease` ungated | Only force-with-lease when `DID_REBASE_THIS_ROUND=true`. A normal push failure (branch protection, upstream race) must fail loudly, not escalate to force. |
+| Unqualified `--force-with-lease` + pre-fetch of feature branch | The unqualified form leases against `refs/remotes/origin/<branch>` which a preceding `git fetch <branch>` just refreshed → vacuous pass, clobbers concurrent /coder pushes. Always pass `=<branch>:<pre-rebase-sha>` and do NOT fetch the feature branch before pushing. |
+| `flock(1)` for the worktree lock | macOS has no `flock` by default — the lock silently fails. Use a portable `mkdir`-based lock; cleanup via trap. |
 | Mutating gates (`cargo fmt`, `ruff --fix`) in 1g | Use `*-check` variants only. Auto-mutation without a fresh agent in the loop is silent code edits. |
 | /diagnose path missing → empty prompt | If all three install-layout paths miss, skip /diagnose this round and tier-2 the failure with a "diagnose unavailable" fix-spec. Don't dispatch with placeholder content. |
 | LAST_CHECKED from local clock | Use the max `updated_at`/`submitted_at`/`created_at` seen in this round's results. Local clock drift permanently loses comments after wake/NTP. |
